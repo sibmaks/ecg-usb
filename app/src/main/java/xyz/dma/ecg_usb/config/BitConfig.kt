@@ -25,14 +25,26 @@ open class BitConfig {
 
     fun getBits(fromIndex: Int, bitCount: Int) : Int {
         var value = 0
-        for(i in (fromIndex - bitCount + 1)..fromIndex) {
+        for(i in fromIndex downTo (fromIndex - bitCount + 1)) {
             if(bits[i]) {
-                value = value or 0x1
+                value = value or 1
             }
-            if(i != fromIndex) {
+            if(i != (fromIndex - bitCount + 1)) {
                 value = value shl 1
             }
         }
         return value
+    }
+
+    fun readBit(data: UInt) : Boolean {
+        return (data and 1u) == 1u
+    }
+
+    fun readBits(data: UInt, bits: UInt) : UInt {
+        var value = 0u
+        for(i in 0u until bits) {
+            value = (value shl 1) or 1u
+        }
+        return data and value
     }
 }

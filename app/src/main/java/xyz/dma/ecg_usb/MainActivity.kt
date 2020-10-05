@@ -15,12 +15,12 @@ import com.jjoe64.graphview.series.DataPoint
 import com.jjoe64.graphview.series.LineGraphSeries
 import xyz.dma.ecg_usb.MAX30003Driver.Companion.ECG_FIFO
 import xyz.dma.ecg_usb.MAX30003Driver.Companion.RTOR
+import xyz.dma.ecg_usb.MAX30003Driver.Companion.STATUS
 import xyz.dma.ecg_usb.microchipusb.DeviceType
 import xyz.dma.ecg_usb.microchipusb.MCP2210Driver
 import xyz.dma.ecg_usb.microchipusb.MCPConnection
 import xyz.dma.ecg_usb.microchipusb.MCPConnectionFactory
 import java.util.concurrent.TimeUnit
-import java.util.function.Consumer
 import kotlin.math.max
 
 
@@ -76,21 +76,28 @@ class MainActivity : AppCompatActivity() {
                                     }
                                 }
                                 val driver = MCP2210Driver(connection) { t: String -> log(t) }
-                                val maxDriver = MAX30003Driver(driver)
-                                maxDriver.open {log(it)}
+                                val maxDriver = MAX30003Driver(driver,{ a -> log(a) })
+                                maxDriver.open()
                                 Thread {
                                     var time : Long = 0
                                     val RTOR_LSB_RES = 0.0078125f
                                     while (true) {
                                         try {
+                                            val status = maxDriver.readRegister(STATUS)
+                                            if((status and MAX30003Driver.EINT_STATUS) != MAX30003Driver.EINT_STATUS) {
+                                                log("Haven't ecg data: $status")
+                                                continue
+                                            }
+
                                             val egcData = maxDriver.readRegister(ECG_FIFO)
                                             //log("Response: ${response[1].toString(2)} ${response[2].toString(2)} ${response[3].toString(2)}")
 
                                             val ecgdata = (egcData shr 8).toShort()
                                             val etag = (egcData shr 3) and 0x7u
                                             if(etag != 0u && etag != 1u) {
-                                                log("ETAG repones $etag")
+                                                log("ETAG response $etag")
                                                 if (etag == 0x7u) {//FIFO_OVF
+                                                    maxDriver.writeRegister(MAX30003Driver.SW_RST, 0x000000)
                                                     maxDriver.sendSynch() // Reset FIFO
                                                 }
                                                 continue
@@ -140,24 +147,29 @@ class MainActivity : AppCompatActivity() {
                                         return
                                     }
                                 }
-                                val driver = MCP2210Driver(connection, Consumer { log(it) })
-                                val maxDriver = MAX30003Driver(driver)
-                                maxDriver.open { log(it) }
+                                val driver = MCP2210Driver(connection, { log(it) })
+                                val maxDriver = MAX30003Driver(driver,{ a -> log(a) })
+                                maxDriver.open()
                                 Thread {
                                     var time : Long = 0
                                     val RTOR_LSB_RES = 0.0078125f
                                     while (true) {
                                         try {
-                                            val status = maxDriver.readRegister(MAX30003Driver.STATUS)
+                                            val status = maxDriver.readRegister(STATUS)
+                                            if((status and MAX30003Driver.EINT_STATUS) != MAX30003Driver.EINT_STATUS) {
+                                                log("Haven't ecg data: $status")
+                                                continue
+                                            }
+
                                             val egcData = maxDriver.readRegister(ECG_FIFO)
                                             //log("Response: ${response[1].toString(2)} ${response[2].toString(2)} ${response[3].toString(2)}")
 
                                             val ecgdata = (egcData shr 8).toShort()
                                             val etag = (egcData shr 3) and 0x7u
                                             if(etag != 0u && etag != 1u) {
+                                                log("ETAG response $etag")
                                                 if (etag == 0x7u) {//FIFO_OVF
-                                                    log("ETAG repones $etag")
-                                                    log("Send sync")
+                                                    maxDriver.writeRegister(MAX30003Driver.SW_RST, 0x000000)
                                                     maxDriver.sendSynch() // Reset FIFO
                                                 }
                                                 continue
@@ -171,7 +183,7 @@ class MainActivity : AppCompatActivity() {
 
                                             val hr = 1.0f / ( responseRtor.toFloat() * RTOR_LSB_RES / 60.0f )
 
-                                            changeData(status.toString(16) + ":" + etag.toString(16) + ":" + hr)
+                                            changeData(etag.toString(16) + ":" + hr)
                                         } catch (e: Exception) {
                                             log(e.message ?: "null message")
                                             log(e.stackTraceToString())

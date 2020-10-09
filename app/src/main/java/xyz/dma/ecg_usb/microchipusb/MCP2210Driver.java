@@ -3,9 +3,13 @@ package xyz.dma.ecg_usb.microchipusb;
 import java.nio.ByteBuffer;
 import java.nio.CharBuffer;
 import java.nio.IntBuffer;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 public class MCP2210Driver {
+    private static final byte[] cmdData = new byte[64];
+    private static final byte[] rxData = new byte[65];
+    private static final ByteBuffer command = ByteBuffer.wrap(cmdData);
 
     /**
      * Used to check the error.
@@ -82,25 +86,9 @@ public class MCP2210Driver {
     private byte mInterruptPinMd;
 
     /**
-     * SPI bus release external request status.
-     */
-    private byte mSpiBusExtReq;
-    /**
-     * SPI bus current owner.
-     */
-    private byte mSpiBusOwner;
-    /**
      * Number of tries at password.
      */
     private byte mAccessAttemptCnt;
-    /**
-     * Was the password correctly given?
-     */
-    private byte mAccessGranted;
-    /**
-     * USB-SPI transaction ongoing (at cancellation moment).
-     */
-    private byte mUsbSpiTxOnGoing;
 
     /**
      * Create a new MCP2210.
@@ -110,1075 +98,6 @@ public class MCP2210Driver {
     public MCP2210Driver(final MCPConnection mcpConnection, Consumer<String> logger) {
         this.mcpConnection = mcpConnection;
         this.logger = logger;
-    }
-
-    /**
-     * Allow the user to configure default settings.
-     *
-     * @param whichToGet       (int) [IN] Use constants defined in Mcp2210Constants class.
-     *                         Current setting = 0,
-     *                         Power-up default = 1,
-     *                         Both = 2
-     * @param baudRateBuf      (IntBuffer) [OUT] SPI bit rate speed
-     * @param idleCsValBuf     (IntBuffer) [OUT] IDLE chip-select
-     * @param activeCsValBuf   (IntBuffer) [OUT] ACTIVE chip-select
-     * @param csToDataDlyBuf   (IntBuffer) [OUT] Delay between the assertion of Chip Select
-     *                         and the first data byte
-     * @param dataToDataDlyBuf (IntBuffer) [OUT] Delay between subsequent data bytes
-     * @param dataToCsDlyBuf   (IntBuffer) [OUT] Delay between the end of the last byte of the SPI transfer
-     *                         and the de-assertion of the Chip Select
-     * @param txferSizeBuf     (IntBuffer) [OUT] Bytes per SPI transaction
-     * @param spiMdBuf         (ByteBuffer) [OUT] SPI mode
-     * @return (int) Error code. Indicates if the operation was successful or not.
-     */
-
-    public final int getAllSpiSettings(final ExchangeType whichToGet, final IntBuffer baudRateBuf,
-                                       final IntBuffer idleCsValBuf, final IntBuffer activeCsValBuf,
-                                       final IntBuffer csToDataDlyBuf, final IntBuffer dataToDataDlyBuf,
-                                       final IntBuffer dataToCsDlyBuf, final IntBuffer txferSizeBuf, final IntBuffer spiMdBuf) {
-
-        int result;
-
-        /* Get the settings */
-        if (whichToGet == ExchangeType.CURRENT_SETTINGS_ONLY) {
-            result =
-                    getCurrentSpiTxferSettings(
-                    );
-
-        } else if (whichToGet == ExchangeType.POWER_UP_DEFAULTS_ONLY) {
-            result =
-                    getPwrUpSpiTxferSettings();
-
-        } else {
-            return Mcp2210Constants.ERROR_INVALID_PARAM_GIVEN_1;
-        }
-
-        /* Verify if errors have been occurred */
-        if (result != Mcp2210Constants.SUCCESSFUL) {
-            interpretErrorCode((byte) result);
-        }
-
-        /* Put the new settings in the output variable buffers */
-        baudRateBuf.put(mBaudRate);
-        idleCsValBuf.put(mIdleCsVal);
-        activeCsValBuf.put(mActiveCsVal);
-        csToDataDlyBuf.put(mCsToDataDly);
-        dataToDataDlyBuf.put(mDataToDataDly);
-        dataToCsDlyBuf.put(mDataToCsDly);
-        txferSizeBuf.put(mTxferSize);
-        spiMdBuf.put(mSpiMd);
-
-        /* Return SUCCESS message if no errors have been occurred */
-        return Mcp2210Constants.SUCCESSFUL;
-
-    }
-
-    /**
-     * Set all the SPI settings with one function.
-     *
-     * @param whichToSet       (int) [IN] Use static constants defined in Mcp2210Constants class.
-     *                         Use one of the following:
-     *                         CURRENT_SETTINGS_ONLY = 0,
-     *                         PWR_DEFAULT_ONLY = 1,
-     *                         BOTH = 2
-     * @param baudRateSet      (int) [IN] SPI bit rate speed
-     * @param idleCsValSet     (int) [IN] IDLE chip select
-     * @param activeCsValSet   (int) [IN] ACTIVE chip select
-     * @param csToDataDlySet   (int) [IN] CS to data delay
-     * @param dataToDataDlySet (int) [IN] Delay between subsequent data bytes
-     * @param dataToCsDlySet   (int) [IN] Last data byte to chip select
-     * @param txferSizeSet     (int) [IN] Bytes per SPI transaction
-     * @param spiMdSet         (byte) [IN] SPI mode(Possible values:0,1,2, or 3)
-     * @return (int) Error code. Indicates if the operation was successful or not.
-     */
-
-    public final int setAllSpiSettings(final ExchangeType whichToSet, final int baudRateSet,
-                                       final int idleCsValSet, final int activeCsValSet,
-                                       final int csToDataDlySet, final int dataToDataDlySet,
-                                       final int dataToCsDlySet, final int txferSizeSet, final byte spiMdSet) {
-
-        /* Ensure parameters are valid values */
-        if (whichToSet != ExchangeType.CURRENT_SETTINGS_ONLY
-                && whichToSet != ExchangeType.POWER_UP_DEFAULTS_ONLY
-                && whichToSet != ExchangeType.BOTH) {
-            return Mcp2210Constants.ERROR_INVALID_PARAM_GIVEN_1;
-        }
-        if (spiMdSet < 0 || spiMdSet > 3) {
-            return Mcp2210Constants.ERROR_INVALID_PARAM_GIVEN_9;
-        }
-
-        /* Declare local variables */
-        int result;
-        /* Based off of whichToSet, determine which settings to grab as the 'base' */
-        if (whichToSet == ExchangeType.CURRENT_SETTINGS_ONLY
-                || whichToSet == ExchangeType.BOTH) {
-            /* Get the current settings */
-            result =
-                    getCurrentSpiTxferSettings(
-                    );
-            if (result != Mcp2210Constants.SUCCESSFUL) {
-                if (DEBUG) {
-                    return Mcp2210Constants.ERROR_LOC_PART1 + Mcp2210Constants.ERROR_LOC_SUBPART1
-                            + result;
-                } else {
-                    return result;
-                }
-            }
-            /* Set the new settings to the local variable */
-            mBaudRate = baudRateSet;
-            mIdleCsVal = idleCsValSet;
-            mActiveCsVal = activeCsValSet;
-            mCsToDataDly = csToDataDlySet;
-            mDataToDataDly = dataToDataDlySet;
-            mDataToCsDly = dataToCsDlySet;
-            mTxferSize = txferSizeSet;
-            mSpiMd = spiMdSet;
-            /* Set the current settings */
-            result =
-                    setCurrentSpiTxferSettings(mBaudRate, mIdleCsVal, mActiveCsVal, mCsToDataDly,
-                            mDataToDataDly, mDataToCsDly, mTxferSize, mSpiMd);
-            if (result != Mcp2210Constants.SUCCESSFUL) {
-                if (DEBUG) {
-                    return Mcp2210Constants.ERROR_LOC_PART1 + Mcp2210Constants.ERROR_LOC_SUBPART2
-                            + result;
-                } else {
-                    return result;
-                }
-
-            }
-        }
-        if (whichToSet == ExchangeType.POWER_UP_DEFAULTS_ONLY
-                || whichToSet == ExchangeType.BOTH) {
-            /* Get the power-up defaults */
-            result =
-                    getPwrUpSpiTxferSettings();
-            if (result != Mcp2210Constants.SUCCESSFUL) {
-                if (DEBUG) {
-                    return Mcp2210Constants.ERROR_LOC_PART2 + Mcp2210Constants.ERROR_LOC_SUBPART1
-                            + result;
-                } else {
-                    return result;
-                }
-            }
-            /* Set the new settings to the local variable */
-            mBaudRate = baudRateSet;
-            mIdleCsVal = idleCsValSet;
-            mActiveCsVal = activeCsValSet;
-            mCsToDataDly = csToDataDlySet;
-            mDataToDataDly = dataToDataDlySet;
-            mDataToCsDly = dataToCsDlySet;
-            mTxferSize = txferSizeSet;
-            mSpiMd = spiMdSet;
-            /* Set the power-up defaults */
-            result =
-                    setPwrUpSpiTxferSettings(mBaudRate, mIdleCsVal, mActiveCsVal, mCsToDataDly,
-                            mDataToDataDly, mDataToCsDly, mTxferSize, mSpiMd);
-            if (result != Mcp2210Constants.SUCCESSFUL) {
-                if (DEBUG) {
-                    return Mcp2210Constants.ERROR_LOC_PART2 + Mcp2210Constants.ERROR_LOC_SUBPART2
-                            + result;
-                } else {
-                    return result;
-                }
-            }
-        }
-        return Mcp2210Constants.SUCCESSFUL;
-
-    }
-
-    /**
-     * Get SPI bit rate value.
-     *
-     * @param whichToGet (int) [IN] Use constants defined in Mcp2210Constants class:
-     *                   CURRENT_SETTINGS_ONLY = 0,
-     *                   PWRUP_DEFAULTS_ONLY = 1.
-     * @return (int) Returns the value of the SPI bit rate.
-     */
-
-    public final int getSpiBitRate(final ExchangeType whichToGet) {
-        //Verify input parameter is correct and get appropriate settings
-        if (whichToGet == ExchangeType.CURRENT_SETTINGS_ONLY) {
-            int currentBitRate;
-            /*Setup a buffer with command - Retrieve manufacture string */
-            byte[] cmdData = new byte[64];
-            /* Get current SPI transfer settings. */
-            cmdData[0] = Mcp2210Constants.CMD_SPI_TXFER_SETTINGS_GET;
-            /* Reserved */
-            cmdData[1] = 0x00;
-            cmdData[2] = 0x00;
-            cmdData[3] = 0x00;
-            /* Write the command to the device */
-            boolean writeResult = false;
-            boolean readResult = false;
-            ByteBuffer command = ByteBuffer.wrap(cmdData);
-            ByteBuffer response = mcpConnection.sendData(command);
-            if (response != null) {
-                writeResult = true;
-                readResult = true;
-            }
-            /* Check for error */
-            if (!writeResult) {
-                return Mcp2210Constants.ERROR_DEV_WRITE_FAILED;
-            }
-
-            /* Retrieve the data sent from the device to the host */
-            byte[] rxData = new byte[64];
-            for (int i = 0; i < response.capacity(); i++) {
-                rxData[i] = response.get(i);
-            }
-            /* Check for error */
-            if (!readResult) {
-                return Mcp2210Constants.ERROR_DEV_READ_FAILED;
-            } else if (rxData[Mcp2210Constants.PKT_INDX_CMD] != cmdData[Mcp2210Constants.PKT_INDX_CMD]) {
-                /* Ensure command byte was echoed back. */
-                return Mcp2210Constants.ERROR_CMD_NOT_ECHOED;
-            } else if (rxData[Mcp2210Constants.PKT_INDX_CMD_RET_CODE]
-                    != Mcp2210Constants.SUCCESSFUL) {
-                /* Unknown error, return the exact value */
-                return interpretErrorCode(rxData[Mcp2210Constants.PKT_INDX_CMD_RET_CODE]);
-            } else {
-                /* Successful operation. Get needed data and return 0 */
-                /* Get bit rate (32 bit value) */
-                currentBitRate =
-                        ((rxData[7] << 24) & 0xFF000000) + ((rxData[6] << 16) & 0xFF0000)
-                                + ((rxData[5] << 8) & 0xFF00) + (rxData[4] & 0xFF);
-                return currentBitRate;
-
-            }
-        } else if (whichToGet == ExchangeType.POWER_UP_DEFAULTS_ONLY) {
-            int pwrBitRate;
-            /* Setup a buffer with command - Retrieve manufacture string */
-            byte[] cmdData = new byte[64];
-            /* Get NVRAM */
-            cmdData[0] = Mcp2210Constants.CMD_NVRAM_PARAM_GET;
-            /* Get SPI power-up settings. */
-            cmdData[1] = Mcp2210Constants.NVRAM_SPI_TX_SETTINGS;
-            /* Write the command to the device. */
-            boolean writeResult = false;
-            boolean readResult = false;
-            ByteBuffer command = ByteBuffer.wrap(cmdData);
-            ByteBuffer response = mcpConnection.sendData(command);
-            if (response != null) {
-                writeResult = true;
-                readResult = true;
-            }
-            /* Check for error. */
-            if (!writeResult) {
-                return Mcp2210Constants.ERROR_DEV_WRITE_FAILED;
-            }
-            /* Retrieve the data sent from the device to the host. */
-            byte[] rxData = new byte[65];
-            for (int i = 0; i < response.capacity(); i++) {
-                rxData[i] = response.get(i);
-            }
-            /* Check for error. */
-            if (!readResult) {
-                return Mcp2210Constants.ERROR_DEV_READ_FAILED;
-            } else if (rxData[Mcp2210Constants.PKT_INDX_CMD] != cmdData[Mcp2210Constants.PKT_INDX_CMD]) {
-                /* Ensure command byte was echoed back. */
-                return Mcp2210Constants.ERROR_CMD_NOT_ECHOED;
-            } else if (rxData[Mcp2210Constants.PKT_INDX_CMD_RET_CODE]
-                    != Mcp2210Constants.SUCCESSFUL) {
-                /* Unknown error, return the exact value. */
-                return interpretErrorCode(rxData[Mcp2210Constants.PKT_INDX_CMD_RET_CODE]);
-            } else {
-                /* Successful operation. Get needed data and return 0.*/
-
-                /* Get bit rate value (32 bit value). */
-                pwrBitRate =
-                        (((rxData[7] << 24) & 0xFF000000) + ((rxData[6] << 16) & 0xFF00)
-                                + ((rxData[5] << 8) & 0xFF00) + (rxData[4] & 0xFF));
-                return pwrBitRate;
-            }
-        } else {
-            return Mcp2210Constants.ERROR_INVALID_PARAM_GIVEN_1;
-        }
-    }
-
-    /**
-     * Set SPI bit rate value.
-     *
-     * @param whichToSet (int) [IN] Use static constants defined in this class.
-     *                   Use one of the following:
-     *                   CURRENT_SETTINGS_ONLY = 0,
-     *                   PWRUP_DEFAULTS_ONLY = 1,
-     *                   BOTH = 2
-     * @param bitRate    (int) [IN] Value of desired bit rate
-     * @return (int) Contains error code. 0 = successful. Other = failed.
-     */
-
-    public final int setSpiBitRate(final ExchangeType whichToSet, final int bitRate) {
-
-        /* Ensure parameters are valid values */
-        if (whichToSet != ExchangeType.CURRENT_SETTINGS_ONLY
-                && whichToSet != ExchangeType.POWER_UP_DEFAULTS_ONLY
-                && whichToSet != ExchangeType.BOTH) {
-            return Mcp2210Constants.ERROR_INVALID_PARAM_GIVEN_1;
-        }
-        /* Declare local variables */
-        int result;
-        /* Based off of whichToSet, determine which settings to grab as the 'base' */
-        if (whichToSet == ExchangeType.CURRENT_SETTINGS_ONLY
-                || whichToSet == ExchangeType.BOTH) {
-            /* Get the current settings */
-            result =
-                    getCurrentSpiTxferSettings(
-                    );
-            if (result != Mcp2210Constants.SUCCESSFUL) {
-                if (DEBUG) {
-                    return Mcp2210Constants.ERROR_LOC_PART1 + Mcp2210Constants.ERROR_LOC_SUBPART1
-                            + result;
-                } else {
-                    return result;
-                }
-            }
-            /* Set the new settings to the local variable */
-            mBaudRate = bitRate;
-            /* Set the current settings */
-            result =
-                    setCurrentSpiTxferSettings(mBaudRate, mIdleCsVal, mActiveCsVal, mCsToDataDly,
-                            mDataToDataDly, mDataToCsDly, mTxferSize, mSpiMd);
-            if (result != Mcp2210Constants.SUCCESSFUL) {
-                if (DEBUG) {
-                    return Mcp2210Constants.ERROR_LOC_PART1 + Mcp2210Constants.ERROR_LOC_SUBPART2
-                            + result;
-                } else {
-                    return result;
-                }
-            }
-        }
-        if (whichToSet == ExchangeType.POWER_UP_DEFAULTS_ONLY
-                || whichToSet == ExchangeType.BOTH) {
-            /* Get the power-up defaults */
-            result =
-                    getPwrUpSpiTxferSettings();
-            if (result != Mcp2210Constants.SUCCESSFUL) {
-                if (DEBUG) {
-                    return Mcp2210Constants.ERROR_LOC_PART2 + Mcp2210Constants.ERROR_LOC_SUBPART1
-                            + result;
-                } else {
-                    return result;
-                }
-            }
-            /* Set the new settings to the local variable */
-            mBaudRate = bitRate;
-            /* Set the power-up defaults */
-            result =
-                    setPwrUpSpiTxferSettings(mBaudRate, mIdleCsVal, mActiveCsVal, mCsToDataDly,
-                            mDataToDataDly, mDataToCsDly, mTxferSize, mSpiMd);
-            if (result != Mcp2210Constants.SUCCESSFUL) {
-                if (DEBUG) {
-                    return Mcp2210Constants.ERROR_LOC_PART2 + Mcp2210Constants.ERROR_LOC_SUBPART2
-                            + result;
-                } else {
-                    return result;
-                }
-            }
-        }
-        return Mcp2210Constants.SUCCESSFUL;
-
-    }
-
-
-    /**
-     * Get the SPI chip select idle value.
-     *
-     * @param whichToGet (int) [IN] Use constants defined in Mcp2210Constants class:
-     *                   CURRENT_SETTINGS_ONLY = 0,
-     *                   PWRUP_DEFAULTS_ONLY = 1.
-     * @return (int) Returns the value of the SPI chip select idle value.
-     * If the return value is negative, the operation failed.
-     */
-
-    public final int getSpiCsIdleValue(final ExchangeType whichToGet) {
-        //Verify input parameter is correct and get appropriate settings
-        if (whichToGet == ExchangeType.CURRENT_SETTINGS_ONLY) {
-            int currentIdleCsVal;
-            /*Setup a buffer with command - Retrieve manufacture string */
-            byte[] cmdData = new byte[64];
-            /* Get current SPI transfer settings. */
-            cmdData[0] = Mcp2210Constants.CMD_SPI_TXFER_SETTINGS_GET;
-            /* Reserved */
-            cmdData[1] = 0x00;
-            cmdData[2] = 0x00;
-            cmdData[3] = 0x00;
-            /* Write the command to the device */
-            boolean writeResult = false;
-            boolean readResult = false;
-            ByteBuffer command = ByteBuffer.wrap(cmdData);
-            ByteBuffer response = mcpConnection.sendData(command);
-            if (response != null) {
-                writeResult = true;
-                readResult = true;
-            }
-            /* Check for error */
-            if (!writeResult) {
-                return Mcp2210Constants.ERROR_DEV_WRITE_FAILED;
-            }
-
-            /* Retrieve the data sent from the device to the host */
-            byte[] rxData = new byte[64];
-            for (int i = 0; i < response.capacity(); i++) {
-                rxData[i] = response.get(i);
-            }
-            /* Check for error */
-            if (!readResult) {
-                return Mcp2210Constants.ERROR_DEV_READ_FAILED;
-            } else if (rxData[Mcp2210Constants.PKT_INDX_CMD] != cmdData[Mcp2210Constants.PKT_INDX_CMD]) {
-                /* Ensure command byte was echoed back. */
-                return Mcp2210Constants.ERROR_CMD_NOT_ECHOED;
-            } else if (rxData[Mcp2210Constants.PKT_INDX_CMD_RET_CODE]
-                    != Mcp2210Constants.SUCCESSFUL) {
-                /* Unknown error, return the exact value */
-                return interpretErrorCode(rxData[Mcp2210Constants.PKT_INDX_CMD_RET_CODE]);
-            } else {
-                /* Successful operation. Get needed data and return 0 */
-                /* Get IDLE CS value. */
-                currentIdleCsVal = (rxData[8] & 0xFF) + ((rxData[9] << 8) & 0xFF00);
-                return currentIdleCsVal;
-
-            }
-        } else if (whichToGet == ExchangeType.POWER_UP_DEFAULTS_ONLY) {
-            int pwrIdleCsVal;
-            /* Setup a buffer with command - Retrieve manufacture string */
-            byte[] cmdData = new byte[64];
-            /* Get NVRAM */
-            cmdData[0] = Mcp2210Constants.CMD_NVRAM_PARAM_GET;
-            /* Get SPI power-up settings. */
-            cmdData[1] = Mcp2210Constants.NVRAM_SPI_TX_SETTINGS;
-            /* Write the command to the device. */
-            boolean writeResult = false;
-            boolean readResult = false;
-            ByteBuffer command = ByteBuffer.wrap(cmdData);
-            ByteBuffer response = mcpConnection.sendData(command);
-            if (response != null) {
-                writeResult = true;
-                readResult = true;
-            }
-            /* Check for error. */
-            if (!writeResult) {
-                return Mcp2210Constants.ERROR_DEV_WRITE_FAILED;
-            }
-            /* Retrieve the data sent from the device to the host. */
-            byte[] rxData = new byte[65];
-            for (int i = 0; i < response.capacity(); i++) {
-                rxData[i] = response.get(i);
-            }
-            /* Check for error. */
-            if (!readResult) {
-                return Mcp2210Constants.ERROR_DEV_READ_FAILED;
-            } else if (rxData[Mcp2210Constants.PKT_INDX_CMD] != cmdData[Mcp2210Constants.PKT_INDX_CMD]) {
-                /* Ensure command byte was echoed back. */
-                return Mcp2210Constants.ERROR_CMD_NOT_ECHOED;
-            } else if (rxData[Mcp2210Constants.PKT_INDX_CMD_RET_CODE]
-                    != Mcp2210Constants.SUCCESSFUL) {
-                /* Unknown error, return the exact value. */
-                return interpretErrorCode(rxData[Mcp2210Constants.PKT_INDX_CMD_RET_CODE]);
-            } else {
-                /* Successful operation. Get needed data and return 0.*/
-                /* Get IDLE CS value (16 bit value) */
-                pwrIdleCsVal = ((rxData[8] & 0xFF) + ((rxData[9] << 8) & 0xFF00));
-                return pwrIdleCsVal;
-            }
-        } else {
-            return Mcp2210Constants.ERROR_INVALID_PARAM_GIVEN_1;
-        }
-    }
-
-    /**
-     * Get the SPI chip select active value.
-     *
-     * @param whichToGet (int) [IN] Use constants defined in Mcp2210Constants class:
-     *                   CURRENT_SETTINGS_ONLY = 0,
-     *                   PWRUP_DEFAULTS_ONLY = 1.
-     * @return (int) Return the value of the SPI chip select active value.
-     * If the return value is negative, the operation failed.
-     */
-
-    public final int getSpiCsActiveValue(final ExchangeType whichToGet) {
-        //Verify input parameter is correct and get appropriate settings
-        if (whichToGet == ExchangeType.CURRENT_SETTINGS_ONLY) {
-            int currentActiveCsVal;
-            /*Setup a buffer with command - Retrieve manufacture string */
-            byte[] cmdData = new byte[64];
-            /* Get current SPI transfer settings. */
-            cmdData[0] = Mcp2210Constants.CMD_SPI_TXFER_SETTINGS_GET;
-            /* Reserved */
-            cmdData[1] = 0x00;
-            cmdData[2] = 0x00;
-            cmdData[3] = 0x00;
-            /* Write the command to the device */
-            boolean writeResult = false;
-            boolean readResult = false;
-            ByteBuffer command = ByteBuffer.wrap(cmdData);
-            ByteBuffer response = mcpConnection.sendData(command);
-            if (response != null) {
-                writeResult = true;
-                readResult = true;
-            }
-            /* Check for error */
-            if (!writeResult) {
-                return Mcp2210Constants.ERROR_DEV_WRITE_FAILED;
-            }
-
-            /* Retrieve the data sent from the device to the host */
-            byte[] rxData = new byte[64];
-            for (int i = 0; i < response.capacity(); i++) {
-                rxData[i] = response.get(i);
-            }
-            /* Check for error */
-            if (!readResult) {
-                return Mcp2210Constants.ERROR_DEV_READ_FAILED;
-            } else if (rxData[Mcp2210Constants.PKT_INDX_CMD] != cmdData[Mcp2210Constants.PKT_INDX_CMD]) {
-                /* Ensure command byte was echoed back. */
-                return Mcp2210Constants.ERROR_CMD_NOT_ECHOED;
-            } else if (rxData[Mcp2210Constants.PKT_INDX_CMD_RET_CODE]
-                    != Mcp2210Constants.SUCCESSFUL) {
-                /* Unknown error, return the exact value */
-                return interpretErrorCode(rxData[Mcp2210Constants.PKT_INDX_CMD_RET_CODE]);
-            } else {
-                /* Successful operation. Get needed data and return 0 */
-                /* Get ACTIVE CS value */
-                currentActiveCsVal = ((rxData[10] & 0xFF) + ((rxData[11] << 8) & 0xFF00));
-                return currentActiveCsVal;
-
-            }
-        } else if (whichToGet == ExchangeType.POWER_UP_DEFAULTS_ONLY) {
-            int pwrActiveCsVal;
-            /* Setup a buffer with command - Retrieve manufacture string */
-            byte[] cmdData = new byte[64];
-            /* Get NVRAM */
-            cmdData[0] = Mcp2210Constants.CMD_NVRAM_PARAM_GET;
-            /* Get SPI power-up settings. */
-            cmdData[1] = Mcp2210Constants.NVRAM_SPI_TX_SETTINGS;
-            /* Write the command to the device. */
-            boolean writeResult = false;
-            boolean readResult = false;
-            ByteBuffer command = ByteBuffer.wrap(cmdData);
-            ByteBuffer response = mcpConnection.sendData(command);
-            if (response != null) {
-                writeResult = true;
-                readResult = true;
-            }
-            /* Check for error. */
-            if (!writeResult) {
-                return Mcp2210Constants.ERROR_DEV_WRITE_FAILED;
-            }
-            /* Retrieve the data sent from the device to the host. */
-            byte[] rxData = new byte[65];
-            for (int i = 0; i < response.capacity(); i++) {
-                rxData[i] = response.get(i);
-            }
-            /* Check for error. */
-            if (!readResult) {
-                return Mcp2210Constants.ERROR_DEV_READ_FAILED;
-            } else if (rxData[Mcp2210Constants.PKT_INDX_CMD] != cmdData[Mcp2210Constants.PKT_INDX_CMD]) {
-                /* Ensure command byte was echoed back. */
-                return Mcp2210Constants.ERROR_CMD_NOT_ECHOED;
-            } else if (rxData[Mcp2210Constants.PKT_INDX_CMD_RET_CODE]
-                    != Mcp2210Constants.SUCCESSFUL) {
-                /* Unknown error, return the exact value. */
-                return interpretErrorCode(rxData[Mcp2210Constants.PKT_INDX_CMD_RET_CODE]);
-            } else {
-                /* Successful operation. Get needed data and return 0.*/
-                /* Get ACTIVE CS value */
-                pwrActiveCsVal = ((rxData[10] & 0xFF) + ((rxData[11] << 8) & 0xFF00));
-                return pwrActiveCsVal;
-            }
-
-        } else {
-            return Mcp2210Constants.ERROR_INVALID_PARAM_GIVEN_1;
-        }
-
-    }
-
-
-    /**
-     * Set the SPI chip select values.
-     *
-     * @param whichToSet     (int) [IN] Use static constants defined in class Mcp2210Constants.
-     *                       Use one of the following:
-     *                       CURRENT_SETTINGS_ONLY = 0;
-     *                       PWRUP_DEFAULTS_ONLY = 1;
-     *                       BOTH = 2.
-     * @param idleCsValSet   (int) [IN] IDLE chip select value
-     * @param activeCsValSet (Integer) [IN] ACTIVE chip select value
-     * @return (int) Error code. Indicates if the operation was successful or not.
-     * 0 = successful, other = failed
-     */
-    public final int setSpiCsValues(final ExchangeType whichToSet, final int idleCsValSet,
-                                    final int activeCsValSet) {
-        /* Ensure parameters are valid values. */
-        if (whichToSet != ExchangeType.CURRENT_SETTINGS_ONLY
-                && whichToSet != ExchangeType.POWER_UP_DEFAULTS_ONLY
-                && whichToSet != ExchangeType.BOTH) {
-            return Mcp2210Constants.ERROR_INVALID_PARAM_GIVEN_1;
-        }
-        /* Declare local variables */
-        int result;
-        /* Based off of whichToSet, determine which settings to grab as the 'base' */
-        if (whichToSet == ExchangeType.CURRENT_SETTINGS_ONLY
-                || whichToSet == ExchangeType.BOTH) {
-            /* Get the current settings */
-            result =
-                    getCurrentSpiTxferSettings(
-                    );
-            if (result != Mcp2210Constants.SUCCESSFUL) {
-                if (DEBUG) {
-                    return Mcp2210Constants.ERROR_LOC_PART1 + Mcp2210Constants.ERROR_LOC_SUBPART1
-                            + result;
-                } else {
-                    return result;
-                }
-            }
-            /* Set the new settings to the local variable */
-            mIdleCsVal = idleCsValSet;
-            mActiveCsVal = activeCsValSet;
-            /* Set the current settings */
-            result =
-                    setCurrentSpiTxferSettings(mBaudRate, mIdleCsVal, mActiveCsVal, mCsToDataDly,
-                            mDataToDataDly, mDataToCsDly, mTxferSize, mSpiMd);
-            if (result != Mcp2210Constants.SUCCESSFUL) {
-                if (DEBUG) {
-                    return Mcp2210Constants.ERROR_LOC_PART1 + Mcp2210Constants.ERROR_LOC_SUBPART2
-                            + result;
-                } else {
-                    return result;
-                }
-            }
-        }
-        if (whichToSet == ExchangeType.POWER_UP_DEFAULTS_ONLY
-                || whichToSet == ExchangeType.BOTH) {
-            /* Get the power-up defaults */
-            result =
-                    getPwrUpSpiTxferSettings();
-            if (result != Mcp2210Constants.SUCCESSFUL) {
-                if (DEBUG) {
-                    return Mcp2210Constants.ERROR_LOC_PART2 + Mcp2210Constants.ERROR_LOC_SUBPART1
-                            + result;
-                } else {
-                    return result;
-                }
-            }
-            /* Set the new settings to the local variable */
-            mIdleCsVal = idleCsValSet;
-            mActiveCsVal = activeCsValSet;
-            /* Set the power-up defaults */
-            result =
-                    setPwrUpSpiTxferSettings(mBaudRate, mIdleCsVal, mActiveCsVal, mCsToDataDly,
-                            mDataToDataDly, mDataToCsDly, mTxferSize, mSpiMd);
-            if (result != Mcp2210Constants.SUCCESSFUL) {
-                if (DEBUG) {
-                    return Mcp2210Constants.ERROR_LOC_PART2 + Mcp2210Constants.ERROR_LOC_SUBPART2
-                            + result;
-                } else {
-                    return result;
-                }
-            }
-        }
-        return Mcp2210Constants.SUCCESSFUL;
-    }
-
-    /**
-     * Get the SPI mode.
-     *
-     * @param whichToGet (int) [IN] Use constants defined in Mcp2210Constants class:
-     *                   CURRENT_SETTINGS_ONLY = 0,
-     *                   PWRUP_DEFAULTS_ONLY = 1.
-     * @return (Integer) Returns the value of the SPI Mode (0,1,2 or 3).
-     * If return code is less than zero, an error occurred
-     */
-
-    public final int getSpiMode(final ExchangeType whichToGet) {
-        //Verify input parameter is correct and get appropriate settings
-        if (whichToGet == ExchangeType.CURRENT_SETTINGS_ONLY) {
-            byte currentSpiMd;
-            /*Setup a buffer with command - Retrieve manufacture string */
-            byte[] cmdData = new byte[64];
-            /* Get current SPI transfer settings. */
-            cmdData[0] = Mcp2210Constants.CMD_SPI_TXFER_SETTINGS_GET;
-            /* Reserved */
-            cmdData[1] = 0x00;
-            cmdData[2] = 0x00;
-            cmdData[3] = 0x00;
-            /* Write the command to the device */
-            boolean writeResult = false;
-            boolean readResult = false;
-            ByteBuffer command = ByteBuffer.wrap(cmdData);
-            ByteBuffer response = mcpConnection.sendData(command);
-            if (response != null) {
-                writeResult = true;
-                readResult = true;
-            }
-            /* Check for error */
-            if (!writeResult) {
-                return Mcp2210Constants.ERROR_DEV_WRITE_FAILED;
-            }
-
-            /* Retrieve the data sent from the device to the host */
-            byte[] rxData = new byte[64];
-            for (int i = 0; i < response.capacity(); i++) {
-                rxData[i] = response.get(i);
-            }
-            /* Check for error */
-            if (!readResult) {
-                return Mcp2210Constants.ERROR_DEV_READ_FAILED;
-            } else if (rxData[Mcp2210Constants.PKT_INDX_CMD] != cmdData[Mcp2210Constants.PKT_INDX_CMD]) {
-                /* Ensure command byte was echoed back. */
-                return Mcp2210Constants.ERROR_CMD_NOT_ECHOED;
-            } else if (rxData[Mcp2210Constants.PKT_INDX_CMD_RET_CODE]
-                    != Mcp2210Constants.SUCCESSFUL) {
-                /* Unknown error, return the exact value */
-                return interpretErrorCode(rxData[Mcp2210Constants.PKT_INDX_CMD_RET_CODE]);
-            } else {
-                /* Successful operation. Get needed data and return 0 */
-                /* Get SPI mode */
-                currentSpiMd = (byte) (rxData[20] & 0xFF);
-                /* Return 0 */
-                return currentSpiMd;
-
-            }
-        } else if (whichToGet == ExchangeType.POWER_UP_DEFAULTS_ONLY) {
-            byte pwrSpiMd;
-            /* Setup a buffer with command - Retrieve manufacture string */
-            byte[] cmdData = new byte[64];
-            /* Get NVRAM */
-            cmdData[0] = Mcp2210Constants.CMD_NVRAM_PARAM_GET;
-            /* Get SPI power-up settings. */
-            cmdData[1] = Mcp2210Constants.NVRAM_SPI_TX_SETTINGS;
-            /* Write the command to the device. */
-            boolean writeResult = false;
-            boolean readResult = false;
-            ByteBuffer command = ByteBuffer.wrap(cmdData);
-            ByteBuffer response = mcpConnection.sendData(command);
-            if (response != null) {
-                writeResult = true;
-                readResult = true;
-            }
-            /* Check for error. */
-            if (!writeResult) {
-                return Mcp2210Constants.ERROR_DEV_WRITE_FAILED;
-            }
-            /* Retrieve the data sent from the device to the host. */
-            byte[] rxData = new byte[65];
-            for (int i = 0; i < response.capacity(); i++) {
-                rxData[i] = response.get(i);
-            }
-            /* Check for error. */
-            if (!readResult) {
-                return Mcp2210Constants.ERROR_DEV_READ_FAILED;
-            } else if (rxData[Mcp2210Constants.PKT_INDX_CMD] != cmdData[Mcp2210Constants.PKT_INDX_CMD]) {
-                /* Ensure command byte was echoed back. */
-                return Mcp2210Constants.ERROR_CMD_NOT_ECHOED;
-            } else if (rxData[Mcp2210Constants.PKT_INDX_CMD_RET_CODE]
-                    != Mcp2210Constants.SUCCESSFUL) {
-                /* Unknown error, return the exact value. */
-                return interpretErrorCode(rxData[Mcp2210Constants.PKT_INDX_CMD_RET_CODE]);
-            } else {
-                /* Successful operation. Get needed data and return 0.*/
-                /* Get SPI mode */
-                pwrSpiMd = (byte) (rxData[20] & 0xFF00);
-                /* Return 0 */
-                return pwrSpiMd;
-            }
-        } else {
-            return Mcp2210Constants.ERROR_INVALID_PARAM_GIVEN_1;
-        }
-    }
-
-    /**
-     * Set the SPI mode.
-     *
-     * @param whichToSet (int) [IN] Use constants defined in this class.
-     *                   Current setting = 0,
-     *                   Power-up default = 1,
-     *                   Both = 2
-     * @param spiMdSet   (byte) [IN] Specify SPI mode 0, 1, 2, or 3
-     * @return (int) Containes error code. 0 = successful. Other = failed
-     */
-
-    public final int setSpiMode(final ExchangeType whichToSet, final byte spiMdSet) {
-
-        /* Ensure parameters are valid values */
-        if (whichToSet != ExchangeType.CURRENT_SETTINGS_ONLY
-                && whichToSet != ExchangeType.POWER_UP_DEFAULTS_ONLY
-                && whichToSet != ExchangeType.BOTH) {
-            return Mcp2210Constants.ERROR_INVALID_PARAM_GIVEN_1;
-        }
-        if (mSpiMd < 0 || mSpiMd > 3) {
-            return Mcp2210Constants.ERROR_INVALID_PARAM_GIVEN_2;
-        }
-        /* Declare local variables */
-        int result;
-        /* Based off of whichToSet, determine which settings to grab as the 'base' */
-        if (whichToSet == ExchangeType.CURRENT_SETTINGS_ONLY
-                || whichToSet == ExchangeType.BOTH) {
-            /* Get the current settings */
-            result =
-                    getCurrentSpiTxferSettings(
-                    );
-            if (result != Mcp2210Constants.SUCCESSFUL) {
-                if (DEBUG) {
-                    return Mcp2210Constants.ERROR_LOC_PART1 + Mcp2210Constants.ERROR_LOC_SUBPART1
-                            + result;
-                } else {
-                    return result;
-                }
-            }
-            /* Set the new settings to the local variable. */
-            mSpiMd = spiMdSet;
-            /* Set the current settings. */
-            result =
-                    setCurrentSpiTxferSettings(mBaudRate, mIdleCsVal, mActiveCsVal, mCsToDataDly,
-                            mDataToDataDly, mDataToCsDly, mTxferSize, mSpiMd);
-            if (result != Mcp2210Constants.SUCCESSFUL) {
-                if (DEBUG) {
-                    return Mcp2210Constants.ERROR_LOC_PART1 + Mcp2210Constants.ERROR_LOC_SUBPART2
-                            + result;
-                } else {
-                    return result;
-                }
-            }
-        }
-        if (whichToSet == ExchangeType.POWER_UP_DEFAULTS_ONLY
-                || whichToSet == ExchangeType.BOTH) {
-            /* Get the power-up defaults */
-            result =
-                    getPwrUpSpiTxferSettings();
-            if (result != Mcp2210Constants.SUCCESSFUL) {
-                if (DEBUG) {
-                    return Mcp2210Constants.ERROR_LOC_PART2 + Mcp2210Constants.ERROR_LOC_SUBPART1
-                            + result;
-                } else {
-                    return result;
-                }
-            }
-            /* Set the new settings to the local variable */
-            mSpiMd = spiMdSet;
-            /* Set the power-up defaults */
-            result =
-                    setPwrUpSpiTxferSettings(mBaudRate, mIdleCsVal, mActiveCsVal, mCsToDataDly,
-                            mDataToDataDly, mDataToCsDly, mTxferSize, mSpiMd);
-            if (result != Mcp2210Constants.SUCCESSFUL) {
-                if (DEBUG) {
-                    return Mcp2210Constants.ERROR_LOC_PART2 + Mcp2210Constants.ERROR_LOC_SUBPART2
-                            + result;
-                } else {
-                    return result;
-                }
-            }
-        }
-        return Mcp2210Constants.SUCCESSFUL;
-
-    }
-
-    /**
-     * Get CS to data SPI delay.
-     *
-     * @param whichToGet (int) [IN] Use constants defined in Mcp2210Constants class:
-     *                   CURRENT_SETTINGS_ONLY = 0,
-     *                   PWRUP_DEFAULTS_ONLY = 1.
-     * @return (Integer) Returns CS to data SPI delay value.
-     * If return code is less than zero, error occurred.
-     */
-
-    public final int getSpiDelayCsToData(final ExchangeType whichToGet) {
-        //Verify input parameter is correct and get appropriate settings
-        if (whichToGet == ExchangeType.CURRENT_SETTINGS_ONLY) {
-            int currentCsToDataDly;
-            /*Setup a buffer with command - Retrieve manufacture string */
-            byte[] cmdData = new byte[64];
-            /* Get current SPI transfer settings. */
-            cmdData[0] = Mcp2210Constants.CMD_SPI_TXFER_SETTINGS_GET;
-            /* Reserved */
-            cmdData[1] = 0x00;
-            cmdData[2] = 0x00;
-            cmdData[3] = 0x00;
-            /* Write the command to the device */
-            boolean writeResult = false;
-            boolean readResult = false;
-            ByteBuffer command = ByteBuffer.wrap(cmdData);
-            ByteBuffer response = mcpConnection.sendData(command);
-            if (response != null) {
-                writeResult = true;
-                readResult = true;
-            }
-            /* Check for error */
-            if (!writeResult) {
-                return Mcp2210Constants.ERROR_DEV_WRITE_FAILED;
-            }
-
-            /* Retrieve the data sent from the device to the host */
-            byte[] rxData = new byte[64];
-            for (int i = 0; i < response.capacity(); i++) {
-                rxData[i] = response.get(i);
-            }
-            /* Check for error */
-            if (!readResult) {
-                return Mcp2210Constants.ERROR_DEV_READ_FAILED;
-            } else if (rxData[Mcp2210Constants.PKT_INDX_CMD] != cmdData[Mcp2210Constants.PKT_INDX_CMD]) {
-                /* Ensure command byte was echoed back. */
-                return Mcp2210Constants.ERROR_CMD_NOT_ECHOED;
-            } else if (rxData[Mcp2210Constants.PKT_INDX_CMD_RET_CODE]
-                    != Mcp2210Constants.SUCCESSFUL) {
-                /* Unknown error, return the exact value */
-                return interpretErrorCode(rxData[Mcp2210Constants.PKT_INDX_CMD_RET_CODE]);
-            } else {
-                /* Successful operation. Get needed data and return 0 */
-                /* Get CS to data delay */
-                currentCsToDataDly = ((rxData[12] & 0xFF) + ((rxData[13] << 8) & 0xFF00));
-                return currentCsToDataDly;
-            }
-        } else if (whichToGet == ExchangeType.POWER_UP_DEFAULTS_ONLY) {
-            int pwrCsToDataDly;
-            /* Setup a buffer with command - Retrieve manufacture string */
-            byte[] cmdData = new byte[64];
-            /* Get NVRAM */
-            cmdData[0] = Mcp2210Constants.CMD_NVRAM_PARAM_GET;
-            /* Get SPI power-up settings. */
-            cmdData[1] = Mcp2210Constants.NVRAM_SPI_TX_SETTINGS;
-            /* Write the command to the device. */
-            boolean writeResult = false;
-            boolean readResult = false;
-            ByteBuffer command = ByteBuffer.wrap(cmdData);
-            ByteBuffer response = mcpConnection.sendData(command);
-            if (response != null) {
-                writeResult = true;
-                readResult = true;
-            }
-            /* Check for error. */
-            if (!writeResult) {
-                return Mcp2210Constants.ERROR_DEV_WRITE_FAILED;
-            }
-            /* Retrieve the data sent from the device to the host. */
-            byte[] rxData = new byte[65];
-            for (int i = 0; i < response.capacity(); i++) {
-                rxData[i] = response.get(i);
-            }
-            /* Check for error. */
-            if (!readResult) {
-                return Mcp2210Constants.ERROR_DEV_READ_FAILED;
-            } else if (rxData[Mcp2210Constants.PKT_INDX_CMD] != cmdData[Mcp2210Constants.PKT_INDX_CMD]) {
-                /* Ensure command byte was echoed back. */
-                return Mcp2210Constants.ERROR_CMD_NOT_ECHOED;
-            } else if (rxData[Mcp2210Constants.PKT_INDX_CMD_RET_CODE]
-                    != Mcp2210Constants.SUCCESSFUL) {
-                /* Unknown error, return the exact value. */
-                return interpretErrorCode(rxData[Mcp2210Constants.PKT_INDX_CMD_RET_CODE]);
-            } else {
-                /* Successful operation. Get needed data and return 0.*/
-                /* Get CS to data delay */
-                pwrCsToDataDly = ((rxData[12] & 0xFF) + ((rxData[13] << 8) & 0xFF00));
-                return pwrCsToDataDly;
-            }
-        } else {
-            return Mcp2210Constants.ERROR_INVALID_PARAM_GIVEN_1;
-        }
-    }
-
-    /**
-     * Get data to data SPI delay.
-     *
-     * @param whichToGet (int) [IN] Use constants defined in Mcp2210Constants class:
-     *                   CURRENT_SETTINGS_ONLY = 0,
-     *                   PWRUP_DEFAULTS_ONLY = 1.
-     * @return (int) Returns data to data SPI delay value.
-     * If return code is less than zero, an error occurred.
-     */
-
-    public final int getSpiDelayDataToData(final ExchangeType whichToGet) {
-        //Verify input parameter is correct and get appropriate settings
-        if (whichToGet == ExchangeType.CURRENT_SETTINGS_ONLY) {
-            int currentDataToDataDly;
-            /*Setup a buffer with command - Retrieve manufacture string */
-            byte[] cmdData = new byte[64];
-            /* Get current SPI transfer settings. */
-            cmdData[0] = Mcp2210Constants.CMD_SPI_TXFER_SETTINGS_GET;
-            /* Reserved */
-            cmdData[1] = 0x00;
-            cmdData[2] = 0x00;
-            cmdData[3] = 0x00;
-            /* Write the command to the device */
-            boolean writeResult = false;
-            boolean readResult = false;
-            ByteBuffer command = ByteBuffer.wrap(cmdData);
-            ByteBuffer response = mcpConnection.sendData(command);
-            if (response != null) {
-                writeResult = true;
-                readResult = true;
-            }
-            /* Check for error */
-            if (!writeResult) {
-                return Mcp2210Constants.ERROR_DEV_WRITE_FAILED;
-            }
-
-            /* Retrieve the data sent from the device to the host */
-            byte[] rxData = new byte[64];
-            for (int i = 0; i < response.capacity(); i++) {
-                rxData[i] = response.get(i);
-            }
-            /* Check for error */
-            if (!readResult) {
-                return Mcp2210Constants.ERROR_DEV_READ_FAILED;
-            } else if (rxData[Mcp2210Constants.PKT_INDX_CMD] != cmdData[Mcp2210Constants.PKT_INDX_CMD]) {
-                /* Ensure command byte was echoed back. */
-                return Mcp2210Constants.ERROR_CMD_NOT_ECHOED;
-            } else if (rxData[Mcp2210Constants.PKT_INDX_CMD_RET_CODE]
-                    != Mcp2210Constants.SUCCESSFUL) {
-                /* Unknown error, return the exact value */
-                return interpretErrorCode(rxData[Mcp2210Constants.PKT_INDX_CMD_RET_CODE]);
-            } else {
-                /* Successful operation. Get needed data and return 0 */
-                /* Get data to data delay */
-                currentDataToDataDly = ((rxData[16] & 0xFF) + ((rxData[17] << 8) & 0xFF00));
-                return currentDataToDataDly;
-
-            }
-        } else if (whichToGet == ExchangeType.POWER_UP_DEFAULTS_ONLY) {
-            int pwrDataToDataDly;
-            /* Setup a buffer with command - Retrieve manufacture string */
-            byte[] cmdData = new byte[64];
-            /* Get NVRAM */
-            cmdData[0] = Mcp2210Constants.CMD_NVRAM_PARAM_GET;
-            /* Get SPI power-up settings. */
-            cmdData[1] = Mcp2210Constants.NVRAM_SPI_TX_SETTINGS;
-            /* Write the command to the device. */
-            boolean writeResult = false;
-            boolean readResult = false;
-            ByteBuffer command = ByteBuffer.wrap(cmdData);
-            ByteBuffer response = mcpConnection.sendData(command);
-            if (response != null) {
-                writeResult = true;
-                readResult = true;
-            }
-            /* Check for error. */
-            if (!writeResult) {
-                return Mcp2210Constants.ERROR_DEV_WRITE_FAILED;
-            }
-            /* Retrieve the data sent from the device to the host. */
-            byte[] rxData = new byte[65];
-            for (int i = 0; i < response.capacity(); i++) {
-                rxData[i] = response.get(i);
-            }
-            /* Check for error. */
-            if (!readResult) {
-                return Mcp2210Constants.ERROR_DEV_READ_FAILED;
-            } else if (rxData[Mcp2210Constants.PKT_INDX_CMD] != cmdData[Mcp2210Constants.PKT_INDX_CMD]) {
-                /* Ensure command byte was echoed back. */
-                return Mcp2210Constants.ERROR_CMD_NOT_ECHOED;
-            } else if (rxData[Mcp2210Constants.PKT_INDX_CMD_RET_CODE]
-                    != Mcp2210Constants.SUCCESSFUL) {
-                /* Unknown error, return the exact value. */
-                return interpretErrorCode(rxData[Mcp2210Constants.PKT_INDX_CMD_RET_CODE]);
-            } else {
-                /* Successful operation. Get needed data and return 0.*/
-                /* Get data to data delay */
-                pwrDataToDataDly = ((rxData[16] & 0xFF) + ((rxData[17] << 8) & 0xFF00));
-                return pwrDataToDataDly;
-            }
-        } else {
-            return Mcp2210Constants.ERROR_INVALID_PARAM_GIVEN_1;
-        }
     }
 
     /**
@@ -1196,7 +115,7 @@ public class MCP2210Driver {
         if (whichToGet == ExchangeType.CURRENT_SETTINGS_ONLY) {
             int currentDataToCsDly;
             /*Setup a buffer with command - Retrieve manufacture string */
-            byte[] cmdData = new byte[64];
+
             /* Get current SPI transfer settings. */
             cmdData[0] = Mcp2210Constants.CMD_SPI_TXFER_SETTINGS_GET;
             /* Reserved */
@@ -1205,12 +124,10 @@ public class MCP2210Driver {
             cmdData[3] = 0x00;
             /* Write the command to the device */
             boolean writeResult = false;
-            boolean readResult = false;
-            ByteBuffer command = ByteBuffer.wrap(cmdData);
+
             ByteBuffer response = mcpConnection.sendData(command);
             if (response != null) {
                 writeResult = true;
-                readResult = true;
             }
             /* Check for error */
             if (!writeResult) {
@@ -1218,14 +135,11 @@ public class MCP2210Driver {
             }
 
             /* Retrieve the data sent from the device to the host */
-            byte[] rxData = new byte[64];
             for (int i = 0; i < response.capacity(); i++) {
                 rxData[i] = response.get(i);
             }
             /* Check for error */
-            if (!readResult) {
-                return Mcp2210Constants.ERROR_DEV_READ_FAILED;
-            } else if (rxData[Mcp2210Constants.PKT_INDX_CMD] != cmdData[Mcp2210Constants.PKT_INDX_CMD]) {
+            if (rxData[Mcp2210Constants.PKT_INDX_CMD] != cmdData[Mcp2210Constants.PKT_INDX_CMD]) {
                 /* Ensure command byte was echoed back. */
                 return Mcp2210Constants.ERROR_CMD_NOT_ECHOED;
             } else if (rxData[Mcp2210Constants.PKT_INDX_CMD_RET_CODE]
@@ -1241,33 +155,28 @@ public class MCP2210Driver {
         } else if (whichToGet == ExchangeType.POWER_UP_DEFAULTS_ONLY) {
             int pwrDataToCsDly;
             /* Setup a buffer with command - Retrieve manufacture string */
-            byte[] cmdData = new byte[64];
+
             /* Get NVRAM */
             cmdData[0] = Mcp2210Constants.CMD_NVRAM_PARAM_GET;
             /* Get SPI power-up settings. */
             cmdData[1] = Mcp2210Constants.NVRAM_SPI_TX_SETTINGS;
             /* Write the command to the device. */
             boolean writeResult = false;
-            boolean readResult = false;
-            ByteBuffer command = ByteBuffer.wrap(cmdData);
+
             ByteBuffer response = mcpConnection.sendData(command);
             if (response != null) {
                 writeResult = true;
-                readResult = true;
             }
             /* Check for error. */
             if (!writeResult) {
                 return Mcp2210Constants.ERROR_DEV_WRITE_FAILED;
             }
             /* Retrieve the data sent from the device to the host. */
-            byte[] rxData = new byte[65];
             for (int i = 0; i < response.capacity(); i++) {
                 rxData[i] = response.get(i);
             }
             /* Check for error. */
-            if (!readResult) {
-                return Mcp2210Constants.ERROR_DEV_READ_FAILED;
-            } else if (rxData[Mcp2210Constants.PKT_INDX_CMD] != cmdData[Mcp2210Constants.PKT_INDX_CMD]) {
+            if (rxData[Mcp2210Constants.PKT_INDX_CMD] != cmdData[Mcp2210Constants.PKT_INDX_CMD]) {
                 /* Ensure command byte was echoed back. */
                 return Mcp2210Constants.ERROR_CMD_NOT_ECHOED;
             } else if (rxData[Mcp2210Constants.PKT_INDX_CMD_RET_CODE]
@@ -1287,96 +196,6 @@ public class MCP2210Driver {
     }
 
     /**
-     * Set the SPI delays.
-     *
-     * @param whichToSet       (int) [IN] Use constants defined in Mcp2210Constants class.
-     *                         Current setting = 0,
-     *                         Power-up default = 1,
-     *                         Both = 2
-     * @param csToDataDlySet   (int) [IN] CS to data delay
-     * @param dataToDataDlySet (int) [IN] Delay between subsequent data bytes
-     * @param dataToCsDlySet   (int) [IN] Last data byte to CS
-     * @return (int) Indicates if the operation was successful or not.
-     */
-
-    public final int setSpiDelays(final ExchangeType whichToSet, final int csToDataDlySet,
-                                  final int dataToDataDlySet, final int dataToCsDlySet) {
-
-        /* Ensure parameters are valid values */
-        if (whichToSet != ExchangeType.CURRENT_SETTINGS_ONLY
-                && whichToSet != ExchangeType.POWER_UP_DEFAULTS_ONLY
-                && whichToSet != ExchangeType.BOTH) {
-            return Mcp2210Constants.ERROR_INVALID_PARAM_GIVEN_1;
-        }
-        /* Declare local variables */
-        int result;
-        /* Based off of whichToSet, determine which settings to grab as the 'base' */
-        if (whichToSet == ExchangeType.CURRENT_SETTINGS_ONLY
-                || whichToSet == ExchangeType.BOTH) {
-            /* Get the current settings */
-            result =
-                    getCurrentSpiTxferSettings(
-                    );
-            if (result != Mcp2210Constants.SUCCESSFUL) {
-                if (DEBUG) {
-                    return Mcp2210Constants.ERROR_LOC_PART1 + Mcp2210Constants.ERROR_LOC_SUBPART1
-                            + result;
-                } else {
-                    return result;
-                }
-            }
-            /* Set the new settings to the local variable */
-            mCsToDataDly = csToDataDlySet;
-            mDataToDataDly = dataToDataDlySet;
-            mDataToCsDly = dataToCsDlySet;
-            /* Set the current settings */
-            result =
-                    setCurrentSpiTxferSettings(mBaudRate, mIdleCsVal, mActiveCsVal, mCsToDataDly,
-                            mDataToDataDly, mDataToCsDly, mTxferSize, mSpiMd);
-            if (result != Mcp2210Constants.SUCCESSFUL) {
-                if (DEBUG) {
-                    return Mcp2210Constants.ERROR_LOC_PART1 + Mcp2210Constants.ERROR_LOC_SUBPART2
-                            + result;
-                } else {
-                    return result;
-                }
-            }
-        }
-        if (whichToSet == ExchangeType.POWER_UP_DEFAULTS_ONLY
-                || whichToSet == ExchangeType.BOTH) {
-            /* Get the power-up defaults */
-            result =
-                    getPwrUpSpiTxferSettings();
-            if (result != Mcp2210Constants.SUCCESSFUL) {
-                if (DEBUG) {
-                    return Mcp2210Constants.ERROR_LOC_PART2 + Mcp2210Constants.ERROR_LOC_SUBPART1
-                            + result;
-                } else {
-                    return result;
-                }
-            }
-            /* Set the new settings to the local variable */
-            mCsToDataDly = csToDataDlySet;
-            mDataToDataDly = dataToDataDlySet;
-            mDataToCsDly = dataToCsDlySet;
-            /* Set the power-up defaults */
-            result =
-                    setPwrUpSpiTxferSettings(mBaudRate, mIdleCsVal, mActiveCsVal, mCsToDataDly,
-                            mDataToDataDly, mDataToCsDly, mTxferSize, mSpiMd);
-            if (result != Mcp2210Constants.SUCCESSFUL) {
-                if (DEBUG) {
-                    return Mcp2210Constants.ERROR_LOC_PART2 + Mcp2210Constants.ERROR_LOC_SUBPART2
-                            + result;
-                } else {
-                    return result;
-                }
-            }
-        }
-        return Mcp2210Constants.SUCCESSFUL;
-
-    }
-
-    /**
      * Get the SPI transfer size.
      *
      * @param whichToGet (int) [IN] Use constants defined in Mcp2210Constants class:
@@ -1391,7 +210,7 @@ public class MCP2210Driver {
         if (whichToGet == ExchangeType.CURRENT_SETTINGS_ONLY) {
             int currentTxferSize;
             /*Setup a buffer with command - Retrieve manufacture string */
-            byte[] cmdData = new byte[64];
+
             /* Get current SPI transfer settings. */
             cmdData[0] = Mcp2210Constants.CMD_SPI_TXFER_SETTINGS_GET;
             /* Reserved */
@@ -1400,12 +219,10 @@ public class MCP2210Driver {
             cmdData[3] = 0x00;
             /* Write the command to the device */
             boolean writeResult = false;
-            boolean readResult = false;
-            ByteBuffer command = ByteBuffer.wrap(cmdData);
+
             ByteBuffer response = mcpConnection.sendData(command);
             if (response != null) {
                 writeResult = true;
-                readResult = true;
             }
             /* Check for error */
             if (!writeResult) {
@@ -1413,14 +230,11 @@ public class MCP2210Driver {
             }
 
             /* Retrieve the data sent from the device to the host */
-            byte[] rxData = new byte[64];
             for (int i = 0; i < response.capacity(); i++) {
                 rxData[i] = response.get(i);
             }
             /* Check for error */
-            if (!readResult) {
-                return Mcp2210Constants.ERROR_DEV_READ_FAILED;
-            } else if (rxData[Mcp2210Constants.PKT_INDX_CMD] != cmdData[Mcp2210Constants.PKT_INDX_CMD]) {
+            if (rxData[Mcp2210Constants.PKT_INDX_CMD] != cmdData[Mcp2210Constants.PKT_INDX_CMD]) {
                 /* Ensure command byte was echoed back. */
                 return Mcp2210Constants.ERROR_CMD_NOT_ECHOED;
             } else if (rxData[Mcp2210Constants.PKT_INDX_CMD_RET_CODE]
@@ -1437,33 +251,28 @@ public class MCP2210Driver {
         } else if (whichToGet == ExchangeType.POWER_UP_DEFAULTS_ONLY) {
             int pwrTxferSize;
             /* Setup a buffer with command - Retrieve manufacture string */
-            byte[] cmdData = new byte[64];
+
             /* Get NVRAM */
             cmdData[0] = Mcp2210Constants.CMD_NVRAM_PARAM_GET;
             /* Get SPI power-up settings. */
             cmdData[1] = Mcp2210Constants.NVRAM_SPI_TX_SETTINGS;
             /* Write the command to the device. */
             boolean writeResult = false;
-            boolean readResult = false;
-            ByteBuffer command = ByteBuffer.wrap(cmdData);
+
             ByteBuffer response = mcpConnection.sendData(command);
             if (response != null) {
                 writeResult = true;
-                readResult = true;
             }
             /* Check for error. */
             if (!writeResult) {
                 return Mcp2210Constants.ERROR_DEV_WRITE_FAILED;
             }
             /* Retrieve the data sent from the device to the host. */
-            byte[] rxData = new byte[65];
             for (int i = 0; i < response.capacity(); i++) {
                 rxData[i] = response.get(i);
             }
             /* Check for error. */
-            if (!readResult) {
-                return Mcp2210Constants.ERROR_DEV_READ_FAILED;
-            } else if (rxData[Mcp2210Constants.PKT_INDX_CMD] != cmdData[Mcp2210Constants.PKT_INDX_CMD]) {
+            if (rxData[Mcp2210Constants.PKT_INDX_CMD] != cmdData[Mcp2210Constants.PKT_INDX_CMD]) {
                 /* Ensure command byte was echoed back. */
                 return Mcp2210Constants.ERROR_CMD_NOT_ECHOED;
             } else if (rxData[Mcp2210Constants.PKT_INDX_CMD_RET_CODE]
@@ -1479,7 +288,6 @@ public class MCP2210Driver {
         } else {
             return Mcp2210Constants.ERROR_INVALID_PARAM_GIVEN_1;
         }
-
     }
 
     /**
@@ -1493,7 +301,7 @@ public class MCP2210Driver {
      * @return (int) Contains error code. 0 = successful. Other = failed
      */
 
-    public final int setSpiTxferSize(final ExchangeType whichToSet, final int txferSizeSet) {
+    public final int setSpiTxferSize(final ExchangeType whichToSet, final int txferSizeSet, final int baudRate) {
         /* Ensure parameters are valid values */
         if (whichToSet != ExchangeType.CURRENT_SETTINGS_ONLY
                 && whichToSet != ExchangeType.POWER_UP_DEFAULTS_ONLY
@@ -1519,9 +327,9 @@ public class MCP2210Driver {
             }
             /* Set the new settings to the local variable. */
             mTxferSize = txferSizeSet;
+            mBaudRate = baudRate;
             /* Set the current settings. */
-            result =
-                    setCurrentSpiTxferSettings(mBaudRate, mIdleCsVal, mActiveCsVal, mCsToDataDly,
+            result = setCurrentSpiTxferSettings(mBaudRate, mIdleCsVal, mActiveCsVal, mCsToDataDly,
                             mDataToDataDly, mDataToCsDly, mTxferSize, mSpiMd);
             if (result != Mcp2210Constants.SUCCESSFUL) {
                 if (DEBUG) {
@@ -1573,33 +381,28 @@ public class MCP2210Driver {
     public final int getPwrUpSpiTxferSettings() {
 
         /* Setup a buffer with command - Retrieve manufacture string */
-        byte[] cmdData = new byte[64];
+
         /* Get NVRAM */
         cmdData[0] = Mcp2210Constants.CMD_NVRAM_PARAM_GET;
         /* Get SPI power-up settings. */
         cmdData[1] = Mcp2210Constants.NVRAM_SPI_TX_SETTINGS;
         /* Write the command to the device. */
         boolean writeResult = false;
-        boolean readResult = false;
-        ByteBuffer command = ByteBuffer.wrap(cmdData);
+
         ByteBuffer response = mcpConnection.sendData(command);
         if (response != null) {
             writeResult = true;
-            readResult = true;
         }
         /* Check for error. */
         if (!writeResult) {
             return Mcp2210Constants.ERROR_DEV_WRITE_FAILED;
         }
         /* Retrieve the data sent from the device to the host. */
-        byte[] rxData = new byte[65];
         for (int i = 0; i < response.capacity(); i++) {
             rxData[i] = response.get(i);
         }
         /* Check for error. */
-        if (!readResult) {
-            return Mcp2210Constants.ERROR_DEV_READ_FAILED;
-        } else if (rxData[Mcp2210Constants.PKT_INDX_CMD] != cmdData[Mcp2210Constants.PKT_INDX_CMD]) {
+        if (rxData[Mcp2210Constants.PKT_INDX_CMD] != cmdData[Mcp2210Constants.PKT_INDX_CMD]) {
             /* Ensure command byte was echoed back. */
             return Mcp2210Constants.ERROR_CMD_NOT_ECHOED;
         } else if (rxData[Mcp2210Constants.PKT_INDX_CMD_RET_CODE]
@@ -1654,7 +457,7 @@ public class MCP2210Driver {
                                               final int pwrTxferSize, final byte pwrSpiMd) {
 
         /* Setup a buffer with command */
-        byte[] cmdData = new byte[64];
+
         cmdData[Mcp2210Constants.PKT_INDX_CMD] = Mcp2210Constants.CMD_NVRAM_PARAM_SET;
         cmdData[1] = Mcp2210Constants.NVRAM_SPI_TX_SETTINGS;
         /* Reserved */
@@ -1700,27 +503,21 @@ public class MCP2210Driver {
 
         /* Write the command to the device */
         boolean writeResult = false;
-        boolean readResult = false;
 
-        ByteBuffer command = ByteBuffer.wrap(cmdData);
         ByteBuffer response = mcpConnection.sendData(command);
         if (response != null) {
             writeResult = true;
-            readResult = true;
         }
         /* Check for error */
         if (!writeResult) {
             return Mcp2210Constants.ERROR_DEV_WRITE_FAILED;
         }
         /* Retrieve the data sent from the device to the host -- Error checking */
-        byte[] rxData = new byte[64];
         for (int i = 0; i < response.capacity(); i++) {
             rxData[i] = response.get(i);
         }
         /* Check for error */
-        if (!readResult) {
-            return Mcp2210Constants.ERROR_DEV_READ_FAILED;
-        } else if (rxData[Mcp2210Constants.PKT_INDX_CMD] != cmdData[Mcp2210Constants.PKT_INDX_CMD]) {
+        if (rxData[Mcp2210Constants.PKT_INDX_CMD] != cmdData[Mcp2210Constants.PKT_INDX_CMD]) {
             /*Ensure command byte was echoed back. */
             return Mcp2210Constants.ERROR_CMD_NOT_ECHOED;
         } else {
@@ -1738,7 +535,7 @@ public class MCP2210Driver {
     public final int getCurrentSpiTxferSettings() {
 
         /*Setup a buffer with command - Retrieve manufacture string */
-        byte[] cmdData = new byte[64];
+
         /* Get current SPI transfer settings. */
         cmdData[0] = Mcp2210Constants.CMD_SPI_TXFER_SETTINGS_GET;
         /* Reserved */
@@ -1747,12 +544,10 @@ public class MCP2210Driver {
         cmdData[3] = 0x00;
         /* Write the command to the device */
         boolean writeResult = false;
-        boolean readResult = false;
-        ByteBuffer command = ByteBuffer.wrap(cmdData);
+        
         ByteBuffer response = mcpConnection.sendData(command);
         if (response != null) {
             writeResult = true;
-            readResult = true;
         }
         /* Check for error */
         if (!writeResult) {
@@ -1760,14 +555,11 @@ public class MCP2210Driver {
         }
 
         /* Retrieve the data sent from the device to the host */
-        byte[] rxData = new byte[64];
         for (int i = 0; i < response.capacity(); i++) {
             rxData[i] = response.get(i);
         }
         /* Check for error */
-        if (!readResult) {
-            return Mcp2210Constants.ERROR_DEV_READ_FAILED;
-        } else if (rxData[Mcp2210Constants.PKT_INDX_CMD] != cmdData[Mcp2210Constants.PKT_INDX_CMD]) {
+        if (rxData[Mcp2210Constants.PKT_INDX_CMD] != cmdData[Mcp2210Constants.PKT_INDX_CMD]) {
             /* Ensure command byte was echoed back. */
             return Mcp2210Constants.ERROR_CMD_NOT_ECHOED;
         } else if (rxData[Mcp2210Constants.PKT_INDX_CMD_RET_CODE]
@@ -1821,7 +613,7 @@ public class MCP2210Driver {
                                                 final int currentTxferSize, final byte currentSpiMd) {
 
         /* Setup a buffer with command */
-        byte[] cmdData = new byte[64];
+
         cmdData[Mcp2210Constants.PKT_INDX_CMD] = Mcp2210Constants.CMD_SPI_TXFER_SETTINGS_SET;
         /* Reserved */
         cmdData[1] = 0x00;
@@ -1868,7 +660,7 @@ public class MCP2210Driver {
         /* Write the command to the device */
         boolean writeResult = false;
         boolean readResult = false;
-        ByteBuffer command = ByteBuffer.wrap(cmdData);
+        
         ByteBuffer response = mcpConnection.sendData(command);
         if (response != null) {
             writeResult = true;
@@ -1879,7 +671,6 @@ public class MCP2210Driver {
             return Mcp2210Constants.ERROR_DEV_WRITE_FAILED;
         }
         /* Retrieve the data sent from the device to the host -- Error checking */
-        byte[] rxData = new byte[64];
         for (int i = 0; i < response.capacity(); i++) {
             rxData[i] = response.get(i);
         }
@@ -1904,34 +695,28 @@ public class MCP2210Driver {
      */
     public final int getPwrUpChipSettings(byte[] gpioPinDesInit) {
         /* Setup a buffer with command - Retrieve manufacture string */
-        byte[] cmdData = new byte[64];
+
         /* Get NVRAM */
         cmdData[0] = Mcp2210Constants.CMD_NVRAM_PARAM_GET;
         /* Get chip power-up settings */
         cmdData[1] = Mcp2210Constants.NVRAM_CHIP_SETTINGS;
         /* Write the command to the device */
         boolean writeResult = false;
-        boolean readResult = false;
-        ByteBuffer command = ByteBuffer.wrap(cmdData);
+
         ByteBuffer response = mcpConnection.sendData(command);
         if (response != null) {
             writeResult = true;
-            readResult = true;
         }
         /* Check for error */
         if (!writeResult) {
             return Mcp2210Constants.ERROR_DEV_WRITE_FAILED;
         }
         /* Retrieve the data sent from the device to the host */
-        byte[] rxData = new byte[65];
         for (int i = 0; i < response.capacity(); i++) {
             rxData[i] = response.get(i);
         }
         /* Check for error */
-        if (!readResult) {
-            return Mcp2210Constants.ERROR_DEV_READ_FAILED;
-        } else if (rxData[Mcp2210Constants.PKT_INDX_CMD] != cmdData[Mcp2210Constants.PKT_INDX_CMD]) {
-
+        if (rxData[Mcp2210Constants.PKT_INDX_CMD] != cmdData[Mcp2210Constants.PKT_INDX_CMD]) {
             /* Ensure command byte was echoed back. */
             return Mcp2210Constants.ERROR_CMD_NOT_ECHOED;
         } else if (rxData[Mcp2210Constants.RXPKT_INDX_SUB_CMD]
@@ -1985,7 +770,7 @@ public class MCP2210Driver {
                                           final byte pwrInterruptPinMd, final CharBuffer password) {
 
         /* Setup a buffer with command */
-        byte[] cmdData = new byte[64];
+
         cmdData[Mcp2210Constants.PKT_INDX_CMD] = Mcp2210Constants.CMD_NVRAM_PARAM_SET;
         cmdData[Mcp2210Constants.CMDPKT_INDX_SUB_CMD] = Mcp2210Constants.NVRAM_CHIP_SETTINGS;
         /* Reserved */
@@ -2021,7 +806,7 @@ public class MCP2210Driver {
         /* Write the command to the device */
         boolean writeResult = false;
         boolean readResult = false;
-        ByteBuffer command = ByteBuffer.wrap(cmdData);
+        
         ByteBuffer response = mcpConnection.sendData(command);
         if (response != null) {
             writeResult = true;
@@ -2032,7 +817,6 @@ public class MCP2210Driver {
             return Mcp2210Constants.ERROR_DEV_WRITE_FAILED;
         }
         /* Retrieve the data sent from the device to the host -- Error checking */
-        byte[] rxData = new byte[64];
         for (int i = 0; i < response.capacity(); i++) {
             rxData[i] = response.get(i);
         }
@@ -2058,7 +842,7 @@ public class MCP2210Driver {
     public final int getCurrentChipSettings(byte[] initialGpioPinDes) {
 
         /* Setup a buffer with command - Retrieve manufacture string */
-        byte[] cmdData = new byte[64];
+
         /* Get current settings command */
         cmdData[0] = Mcp2210Constants.CMD_SETTINGS_READ;
         /* Reserved */
@@ -2066,34 +850,21 @@ public class MCP2210Driver {
         cmdData[2] = 0x00;
         cmdData[3] = 0x00;
         /* Write the command to the device */
-        boolean writeResult = false;
-        boolean readResult = false;
-        ByteBuffer command = ByteBuffer.wrap(cmdData);
+        
         ByteBuffer response = mcpConnection.sendData(command);
-        if (response != null) {
-            writeResult = true;
-            readResult = true;
-        }
-        /* Check for error */
-        if (!writeResult) {
+        if (response == null) {
             return Mcp2210Constants.ERROR_DEV_WRITE_FAILED;
         }
-
         /* Retrieve the data sent from the device to the host */
-        byte[] rxData = new byte[65];
         for (int i = 0; i < response.capacity(); i++) {
             rxData[i] = response.get(i);
         }
         /* Check for error */
-        if (!readResult) {
-            return Mcp2210Constants.ERROR_DEV_READ_FAILED;
-        } else if (rxData[Mcp2210Constants.PKT_INDX_CMD] != cmdData[Mcp2210Constants.PKT_INDX_CMD]) {
-
+        if (rxData[Mcp2210Constants.PKT_INDX_CMD] != cmdData[Mcp2210Constants.PKT_INDX_CMD]) {
             /* Ensure command byte was echoed back. */
             return Mcp2210Constants.ERROR_CMD_NOT_ECHOED;
         } else if (rxData[Mcp2210Constants.PKT_INDX_CMD_RET_CODE]
                 != Mcp2210Constants.SUCCESSFUL) {
-
             /* Unknown error, return the exact value . */
             return interpretErrorCode(rxData[Mcp2210Constants.PKT_INDX_CMD_RET_CODE]);
         } else {
@@ -2135,7 +906,6 @@ public class MCP2210Driver {
                                             final byte initialRmtWkupEn, final byte initialInterruptPinMd) {
 
         /* Setup a buffer with command */
-        byte[] cmdData = new byte[64];
         cmdData[Mcp2210Constants.PKT_INDX_CMD] = Mcp2210Constants.CMD_SETTINGS_WRITE;
         /* Write current settings command */
         /* Reserved */
@@ -2157,33 +927,20 @@ public class MCP2210Driver {
         /* Set other chip settings */
         cmdData[17] = (byte) (initialRmtWkupEn | initialInterruptPinMd | initialSpiBusRelEnable);
         /* Write the command to the device */
-        boolean writeResult = false;
-        boolean readResult = false;
-        ByteBuffer command = ByteBuffer.wrap(cmdData);
+
         ByteBuffer response = mcpConnection.sendData(command);
-        if (response != null) {
-            writeResult = true;
-            readResult = true;
-        }
-        /* Check for error */
-        if (!writeResult) {
+        if (response == null) {
             return Mcp2210Constants.ERROR_DEV_WRITE_FAILED;
         }
-
         /* Retrieve the data sent from the device to the host -- Error checking */
-        byte[] rxData = new byte[64];
-        for (int i = 0; i < response.capacity(); i++) {
-            rxData[i] = response.get(i);
-        }
+        byte pktIndexCmd = response.get(Mcp2210Constants.PKT_INDX_CMD);
+        byte pktIndexCmdRetCode = response.get(Mcp2210Constants.PKT_INDX_CMD_RET_CODE);
         /* Check for error */
-        if (!readResult) {
-            return Mcp2210Constants.ERROR_DEV_READ_FAILED;
-        } else if (rxData[Mcp2210Constants.PKT_INDX_CMD] != cmdData[Mcp2210Constants.PKT_INDX_CMD]) {
-
+        if (pktIndexCmd != cmdData[Mcp2210Constants.PKT_INDX_CMD]) {
             /* Ensure command byte was echoed back. */
             return Mcp2210Constants.ERROR_CMD_NOT_ECHOED;
         } else {
-            return interpretErrorCode(rxData[Mcp2210Constants.PKT_INDX_CMD_RET_CODE]);
+            return interpretErrorCode(pktIndexCmdRetCode);
         }
 
     }
@@ -2203,7 +960,7 @@ public class MCP2210Driver {
         if (whichToGet == ExchangeType.CURRENT_SETTINGS_ONLY) {
             int initialDefaultGpioOutput;
             /* Setup a buffer with command - Retrieve manufacture string */
-            byte[] cmdData = new byte[64];
+
             /* Get current settings command */
             cmdData[0] = Mcp2210Constants.CMD_SETTINGS_READ;
             /* Reserved */
@@ -2213,7 +970,7 @@ public class MCP2210Driver {
             /* Write the command to the device */
             boolean writeResult = false;
             boolean readResult = false;
-            ByteBuffer command = ByteBuffer.wrap(cmdData);
+            
             ByteBuffer response = mcpConnection.sendData(command);
             if (response != null) {
                 writeResult = true;
@@ -2225,7 +982,6 @@ public class MCP2210Driver {
             }
 
             /* Retrieve the data sent from the device to the host */
-            byte[] rxData = new byte[65];
             for (int i = 0; i < response.capacity(); i++) {
                 rxData[i] = response.get(i);
             }
@@ -2251,7 +1007,7 @@ public class MCP2210Driver {
         } else if (whichToGet == ExchangeType.POWER_UP_DEFAULTS_ONLY) {
             int pwrDefaultGpioOutput;
             /* Setup a buffer with command - Retrieve manufacture string */
-            byte[] cmdData = new byte[64];
+
             /* Get NVRAM */
             cmdData[0] = Mcp2210Constants.CMD_NVRAM_PARAM_GET;
             /* Get chip power-up settings */
@@ -2259,7 +1015,7 @@ public class MCP2210Driver {
             /* Write the command to the device */
             boolean writeResult = false;
             boolean readResult = false;
-            ByteBuffer command = ByteBuffer.wrap(cmdData);
+            
             ByteBuffer response = mcpConnection.sendData(command);
             if (response != null) {
                 writeResult = true;
@@ -2270,7 +1026,6 @@ public class MCP2210Driver {
                 return Mcp2210Constants.ERROR_DEV_WRITE_FAILED;
             }
             /* Retrieve the data sent from the device to the host */
-            byte[] rxData = new byte[65];
             for (int i = 0; i < response.capacity(); i++) {
                 rxData[i] = response.get(i);
             }
@@ -2300,262 +1055,6 @@ public class MCP2210Driver {
 
         } else {
             return Mcp2210Constants.ERROR_INVALID_PARAM_GIVEN_1;
-        }
-    }
-
-    /**
-     * Get GPIO configuration default direction.
-     *
-     * @param whichToGet (int) [IN] Use constants defined in Mcp2210Constants class:
-     *                   CURRENT_SETTINGS_ONLY = 0;
-     *                   PWRUP_DEFAULTS_ONLY = 1.
-     * @return (int) If less than zero, there was an error. Otherwise this value is the dfltGpioDir
-     * value. More info: Default GPIO direction, where 0 = output and 1 = input Mapping(MSB
-     * to LSB - only lower 9 bits used): GP8VAL GP7VAL GP6VAL GP5VAL GP4VAL GP3VAL GP2VAL
-     * GP1VAL GP0VAL
-     */
-
-    public final int getDefaultGpioDirection(final ExchangeType whichToGet) {
-
-        if (whichToGet == ExchangeType.CURRENT_SETTINGS_ONLY) {
-            int currentDefaultGpioDir;
-            /* Setup a buffer with command - Retrieve manufacture string */
-            byte[] cmdData = new byte[64];
-            /* Get current settings command */
-            cmdData[0] = Mcp2210Constants.CMD_SETTINGS_READ;
-            /* Reserved */
-            cmdData[1] = 0x00;
-            cmdData[2] = 0x00;
-            cmdData[3] = 0x00;
-            /* Write the command to the device */
-            boolean writeResult = false;
-            boolean readResult = false;
-            ByteBuffer command = ByteBuffer.wrap(cmdData);
-            ByteBuffer response = mcpConnection.sendData(command);
-            if (response != null) {
-                writeResult = true;
-                readResult = true;
-            }
-            /* Check for error */
-            if (!writeResult) {
-                return Mcp2210Constants.ERROR_DEV_WRITE_FAILED;
-            }
-
-            /* Retrieve the data sent from the device to the host */
-            byte[] rxData = new byte[65];
-            for (int i = 0; i < response.capacity(); i++) {
-                rxData[i] = response.get(i);
-            }
-            /* Check for error */
-            if (!readResult) {
-                return Mcp2210Constants.ERROR_DEV_READ_FAILED;
-            } else if (rxData[Mcp2210Constants.PKT_INDX_CMD] != cmdData[Mcp2210Constants.PKT_INDX_CMD]) {
-
-                /* Ensure command byte was echoed back. */
-                return Mcp2210Constants.ERROR_CMD_NOT_ECHOED;
-            } else if (rxData[Mcp2210Constants.PKT_INDX_CMD_RET_CODE]
-                    != Mcp2210Constants.SUCCESSFUL) {
-
-                /* Unknown error, return the exact value . */
-                return interpretErrorCode(rxData[Mcp2210Constants.PKT_INDX_CMD_RET_CODE]);
-            } else {
-                /* Successful operation. Get needed data and return 0 */
-                /* Get GPIO default direction */
-                currentDefaultGpioDir = ((rxData[15] & 0xFF) + ((rxData[16] << 8) & 0xFF00));
-                return currentDefaultGpioDir;
-            }
-
-        } else if (whichToGet == ExchangeType.POWER_UP_DEFAULTS_ONLY) {
-            int pwrDefaultGpioDir;
-            /* Setup a buffer with command - Retrieve manufacture string */
-            byte[] cmdData = new byte[64];
-            /* Get NVRAM */
-            cmdData[0] = Mcp2210Constants.CMD_NVRAM_PARAM_GET;
-            /* Get chip power-up settings */
-            cmdData[1] = Mcp2210Constants.NVRAM_CHIP_SETTINGS;
-            /* Write the command to the device */
-            boolean writeResult = false;
-            boolean readResult = false;
-            ByteBuffer command = ByteBuffer.wrap(cmdData);
-            ByteBuffer response = mcpConnection.sendData(command);
-            if (response != null) {
-                writeResult = true;
-                readResult = true;
-            }
-            /* Check for error */
-            if (!writeResult) {
-                return Mcp2210Constants.ERROR_DEV_WRITE_FAILED;
-            }
-            /* Retrieve the data sent from the device to the host */
-            byte[] rxData = new byte[65];
-            for (int i = 0; i < response.capacity(); i++) {
-                rxData[i] = response.get(i);
-            }
-            /* Check for error */
-            if (!readResult) {
-                return Mcp2210Constants.ERROR_DEV_READ_FAILED;
-            } else if (rxData[Mcp2210Constants.PKT_INDX_CMD] != cmdData[Mcp2210Constants.PKT_INDX_CMD]) {
-
-                /* Ensure command byte was echoed back. */
-                return Mcp2210Constants.ERROR_CMD_NOT_ECHOED;
-            } else if (rxData[Mcp2210Constants.RXPKT_INDX_SUB_CMD]
-                    != cmdData[Mcp2210Constants.CMDPKT_INDX_SUB_CMD]) {
-
-                /*Ensure command byte was echoed back. */
-                return Mcp2210Constants.ERROR_SUBCMD_NOT_ECHOED;
-            } else if (rxData[Mcp2210Constants.PKT_INDX_CMD_RET_CODE]
-                    != Mcp2210Constants.SUCCESSFUL) {
-
-                /* Unknown error, return the exact value */
-                return interpretErrorCode(rxData[Mcp2210Constants.PKT_INDX_CMD_RET_CODE]);
-            } else {
-                /* Successful operation. Get needed data and return 0 */
-                /* Get GPIO default direction */
-                pwrDefaultGpioDir = (rxData[15] & 0xff) + (rxData[16] << 8);
-                return pwrDefaultGpioDir;
-            }
-
-        } else {
-            return Mcp2210Constants.ERROR_INVALID_PARAM_GIVEN_1;
-        }
-
-    }
-
-    /**
-     * Get GP Pin designations.
-     *
-     * @param whichToGet (int)  - Use static constants defined in Mcp2210Constants class.
-     *                   BOTH cannot be used in any get... functions.
-     *                   Use one of the following:
-     *                   CURRENT_SETTINGS_ONLY = 0,
-     *                   PWRUP_DEFAULTS_ONLY = 1
-     * @param gpPinDes   (ByteBuffer)   - Array of 9 elements specifying each GP pin designation
-     * @return (int) - If the output ByteBuffer is NULL, then an error occurred .
-     * Otherwise it was successful
-     * <p>
-     * Notes:
-     * Since the output of this function is through the ByteBuffer given as a parameter,
-     * contents of this array does not need to be assigned to anything
-     */
-    public final int getGpPinDesignations(final ExchangeType whichToGet, final ByteBuffer gpPinDes) {
-
-        int result;
-        if (whichToGet == ExchangeType.CURRENT_SETTINGS_ONLY) {
-            result = getCurrentChipSettings(mGpPinDes);
-        } else if (whichToGet == ExchangeType.POWER_UP_DEFAULTS_ONLY) {
-            result = getPwrUpChipSettings(mGpPinDes);
-        } else {
-            return Mcp2210Constants.ERROR_INVALID_PARAM_GIVEN_1;
-        }
-        if (result != Mcp2210Constants.SUCCESSFUL) {
-            interpretErrorCode((byte) result);
-        }
-        /* Assign the current value of the GPIO pin designation to the output array */
-        for (int i = 0; i < 9; i++) {
-            /* GP pin designation */
-            gpPinDes.put(i, mGpPinDes[i]);
-        }
-        return Mcp2210Constants.SUCCESSFUL;
-    }
-
-
-    /**
-     * Get interrupt pin mode settings.
-     *
-     * @param whichToGet (int)  -  Use static constants defined in Mcp2210Constants class.
-     *                   Cannot use BOTH in any get... functions.
-     *                   Use one of the following:
-     *                   CURRENT_SETTINGS_ONLY = 0,
-     *                   PWRUP_DEFAULTS_ONLY = 1
-     * @return (int)  -  Dedicated Pin function (interrupt pin mode).
-     * If the return value is negative, the operation failed.
-     * See below for different modes:
-     * 4 - count high pulses
-     * 3 - count low pulses
-     * 2 - count rising edges
-     * 1 - count falling edges
-     * 0 - no interrupt counting
-     */
-    public final int getInterruptPinMode(final ExchangeType whichToGet) {
-        int result;
-        /* Verify input parameter is correct and get appropriate settings */
-        if (whichToGet == ExchangeType.CURRENT_SETTINGS_ONLY) {
-            result = getCurrentChipSettings(mGpPinDes);
-        } else if (whichToGet == ExchangeType.POWER_UP_DEFAULTS_ONLY) {
-            result = getPwrUpChipSettings(mGpPinDes);
-        } else {
-            return Mcp2210Constants.ERROR_INVALID_PARAM_GIVEN_1;
-        }
-        /* Check error code */
-        if (result != Mcp2210Constants.SUCCESSFUL) {
-            interpretErrorCode((byte) result);
-        }
-        return (mInterruptPinMd >> 1);
-    }
-
-
-    /**
-     * Get the enable state of the remote wake-up setting.
-     *
-     * @param whichToGet (int) - Use static constants defined in Mcp2210Constants class.
-     *                   Cannot use BOTH in any get... functions.
-     *                   Use one of the following:
-     *                   CURRENT_SETTINGS_ONLY = 0,
-     *                   PWRUP_DEFAULTS_ONLY = 1
-     * @return (int) - The status of the remote wake-up enable(1)/disable(0).
-     * If negative, this is an error code.
-     */
-    public final int getRmtWkupEnStatus(final ExchangeType whichToGet) {
-        int result;
-        if (whichToGet == ExchangeType.CURRENT_SETTINGS_ONLY) {
-            result = getCurrentChipSettings(mGpPinDes);
-        } else if (whichToGet == ExchangeType.POWER_UP_DEFAULTS_ONLY) {
-            result = getPwrUpChipSettings(mGpPinDes);
-        } else {
-            return Mcp2210Constants.ERROR_INVALID_PARAM_GIVEN_1;
-        }
-        /* Check return code */
-        if (result != Mcp2210Constants.SUCCESSFUL) {
-            interpretErrorCode((byte) result);
-        }
-        /* Return appropriate value */
-        if (mRmtWkupEn == Mcp2210Constants.REMOTE_WAKEUP_ENABLED) {
-            /* Remote wake-up */
-            return Mcp2210Constants.TRUE;
-        } else if (mRmtWkupEn == Mcp2210Constants.REMOTE_WAKEUP_DISABLED) {
-            return Mcp2210Constants.FALSE;
-        } else {
-            return Mcp2210Constants.ERROR_USB_INVALID_PWR_VALUE;
-        }
-    }
-
-
-    /**
-     * Get the enable state of the SPI bus release setting.
-     *
-     * @param whichToGet (int) - Use static constants defined in Mcp2210Constants class.
-     *                   Cannot use BOTH in any get... functions.
-     *                   Use one of the following:
-     *                   CURRENT_SETTINGS_ONLY = 0,
-     *                   PWRUP_DEFAULTS_ONLY = 1
-     * @return (int) - Returns the status of the remote wake-up enable(1)/disable(0).
-     * If not these values, it is an error code.
-     */
-    public final int getSpiBusReleaseEnStatus(final ExchangeType whichToGet) {
-        int result;
-        /* Verify input parameter is correct and get appropriate settings */
-        if (whichToGet == ExchangeType.CURRENT_SETTINGS_ONLY) {
-            result = getCurrentChipSettings(mGpPinDes);
-        } else if (whichToGet == ExchangeType.POWER_UP_DEFAULTS_ONLY) {
-            result = getPwrUpChipSettings(mGpPinDes);
-        } else {
-            return Mcp2210Constants.ERROR_INVALID_PARAM_GIVEN_1;
-        }
-        /* Check error code */
-        if (result != Mcp2210Constants.SUCCESSFUL) {
-            return interpretErrorCode((byte) result);
-        } else {
-            return mSpiBusRelEnable;
         }
     }
 
@@ -2632,18 +1131,6 @@ public class MCP2210Driver {
         int result;
         /* Based off of whichToSet, determine which settings to grab as the 'base' */
         if (whichToSet == ExchangeType.CURRENT_SETTINGS_ONLY || whichToSet == ExchangeType.BOTH) {
-            /* Get the current settings */
-            result = getCurrentChipSettings(mGpPinDes);
-            if (result != Mcp2210Constants.SUCCESSFUL) {
-                if (DEBUG) {
-                    return Mcp2210Constants.ERROR_LOC_PART1 + Mcp2210Constants.ERROR_LOC_SUBPART1
-                            + result;
-                } else {
-                    return result;
-                }
-            }
-            /* Set the new settings to the local variable */
-
             /* GPIO output defaults */
             mGpioDefaultOutput = dfltGpioOutput;
             /* GPIO direction defaults*/
@@ -2653,8 +1140,7 @@ public class MCP2210Driver {
                 mGpPinDes[i] = gpPinDes.get(i);
             }
             /* Set the current settings */
-            result =
-                    setCurrentChipSettings(mGpPinDes, mGpioDefaultOutput, mGpioDefaultDir,
+            result = setCurrentChipSettings(mGpPinDes, mGpioDefaultOutput, mGpioDefaultDir,
                             mSpiBusRelEnable, mRmtWkupEn, mInterruptPinMd);
             if (result != Mcp2210Constants.SUCCESSFUL) {
                 if (DEBUG) {
@@ -2665,8 +1151,7 @@ public class MCP2210Driver {
                 }
             }
         }
-        if (whichToSet == ExchangeType.POWER_UP_DEFAULTS_ONLY
-                || whichToSet == ExchangeType.BOTH) {
+        if (whichToSet == ExchangeType.POWER_UP_DEFAULTS_ONLY || whichToSet == ExchangeType.BOTH) {
             /* Get the power-up defaults */
             result = getPwrUpChipSettings(mGpPinDes);
             if (result != Mcp2210Constants.SUCCESSFUL) {
@@ -2749,7 +1234,7 @@ public class MCP2210Driver {
      */
     public final int getMCP2210Status() {
         /* Setup a buffer to send with command data */
-        byte[] cmdData = new byte[64];
+
         /* Get MCP2210 status */
         cmdData[0] = Mcp2210Constants.CMD_STATUS_GET;
         /* Reserved */
@@ -2759,7 +1244,7 @@ public class MCP2210Driver {
         /* Write the command to the device */
         boolean writeResult = false;
         boolean readResult = false;
-        ByteBuffer command = ByteBuffer.wrap(cmdData);
+        
         ByteBuffer response = mcpConnection.sendData(command);
         if (response != null) {
             writeResult = true;
@@ -2770,7 +1255,6 @@ public class MCP2210Driver {
             return Mcp2210Constants.ERROR_DEV_WRITE_FAILED;
         }
         /* Retrieve the data sent from the device to the host -- Error checking */
-        byte[] rxData = new byte[64];
         for (int i = 0; i < response.capacity(); i++) {
             rxData[i] = response.get(i);
         }
@@ -2786,67 +1270,14 @@ public class MCP2210Driver {
             return rxData[Mcp2210Constants.PKT_INDX_CMD_RET_CODE];
         } else {
             /* Successful */
-            mSpiBusExtReq = rxData[2];
-            mSpiBusOwner = rxData[3];
             mAccessAttemptCnt = rxData[4];
-            mAccessGranted = rxData[5];
-            mUsbSpiTxOnGoing = rxData[9];
             return Mcp2210Constants.SUCCESSFUL;
         }
     }
 
-    /**
-     * Cancel the current SPI transfer.
-     *
-     * @return (int) Error code. Indicates if the operation was successful or not.
-     * 0 = successful. Other = failed.
-     */
-    public final int cancelSpiTxfer() {
-        /* Setup a buffer to send with command data */
-        byte[] cmdData = new byte[64];
-        /* Get GPIO value command */
-        cmdData[0] = Mcp2210Constants.CMD_SPI_TXFER_CANCEL;
-        /* Reserved */
-        cmdData[1] = 0x00;
-        cmdData[2] = 0x00;
-        cmdData[3] = 0x00;
-        /* Write the command to the device */
-        boolean writeResult = false;
-        boolean readResult = false;
-        ByteBuffer command = ByteBuffer.allocate(64);
-        for (byte cmdDatum : cmdData) {
-            command.put(cmdDatum);
-        }
-        ByteBuffer response = mcpConnection.sendData(command);
-        if (response != null) {
-            writeResult = true;
-            readResult = true;
-        }
-        /* Check for error */
-        if (!writeResult) {
-            return Mcp2210Constants.ERROR_DEV_WRITE_FAILED;
-        }
-        /* Retrieve the data sent from the device to the host -- Error checking */
-        byte[] rxData = new byte[64];
-        for (int i = 0; i < response.capacity(); i++) {
-            rxData[i] = response.get(i);
-        }
-        /* Error: Read failed */
-        if (!readResult) {
-            return Mcp2210Constants.ERROR_DEV_READ_FAILED;
-        } else if (rxData[Mcp2210Constants.PKT_INDX_CMD] != cmdData[Mcp2210Constants.PKT_INDX_CMD]) {
-            /* Error: command byte wasn't echoed back. */
-            return Mcp2210Constants.ERROR_CMD_NOT_ECHOED;
-        } else if (rxData[Mcp2210Constants.PKT_INDX_CMD_RET_CODE]
-                != Mcp2210Constants.SUCCESSFUL) {
-            /* Unknown error, return the exact value. */
-            return rxData[Mcp2210Constants.PKT_INDX_CMD_RET_CODE];
-        } else {
-            /* Successful -- return value of GPIO direction */
-            return Mcp2210Constants.SUCCESSFUL;
-        }
-    }
 
+    private final byte[] tx = new byte[Mcp2210Constants.SPI_BRIDGE_MAX_DATA_PACKET];
+    private final byte[] rx = new byte[Mcp2210Constants.SPI_BRIDGE_MAX_DATA_PACKET];
     /**
      * Transfer the specified SPI data.
      *
@@ -2868,26 +1299,23 @@ public class MCP2210Driver {
         /* Holds operation result */
         int result;
 
-        byte[] tx = new byte[Mcp2210Constants.SPI_BRIDGE_MAX_DATA_PACKET];
-        byte[] rx = new byte[Mcp2210Constants.SPI_BRIDGE_MAX_DATA_PACKET];
         /* Get the transfer size for the SPI transfer */
         /* Get current setting for transfer size */
     /* Temporary variable to hold transfer size of the next transfer
                              operation */
-        int txferSize = getSpiTxferSize(ExchangeType.CURRENT_SETTINGS_ONLY);
-        if (txferSize < 0) {
+        if (mTxferSize < 0) {
       /* An error occured, return the error code (contained within txferSize
                                value) */
-            return txferSize;
+            return mTxferSize;
         }
     /* Determine number of individual SPI transfers to be completed
        Number of full transfers to be completed (max size given by
                                  cSPI_BRIDGE_MAX_DATA_PACKET constant) */
-        int numFullTxfers = txferSize / Mcp2210Constants.SPI_BRIDGE_MAX_DATA_PACKET;
-        if (txferSize % Mcp2210Constants.SPI_BRIDGE_MAX_DATA_PACKET == 0) {
+        int numFullTxfers = mTxferSize / Mcp2210Constants.SPI_BRIDGE_MAX_DATA_PACKET;
+        if (mTxferSize % Mcp2210Constants.SPI_BRIDGE_MAX_DATA_PACKET == 0) {
             partialTxferSize = 0;
         } else {
-            partialTxferSize = txferSize % Mcp2210Constants.SPI_BRIDGE_MAX_DATA_PACKET;
+            partialTxferSize = mTxferSize % Mcp2210Constants.SPI_BRIDGE_MAX_DATA_PACKET;
             /* Get the remaining number of bytes in last transfer. */
         }
         /* keep track of location in data array passed to this function */
@@ -2902,7 +1330,7 @@ public class MCP2210Driver {
         /* Wait a moment and then get the status of the chip to check if device is ready to
                  continue. If not, repeat */
                 try {
-                    Thread.sleep(4);
+                    TimeUnit.NANOSECONDS.sleep(1);
                 } catch (InterruptedException e) {
                     e.printStackTrace();
                 }
@@ -2927,7 +1355,7 @@ public class MCP2210Driver {
         /* Wait a moment and then get the status of the chip to check if device is ready to
            continue. If not, repeat */
                 try {
-                    Thread.sleep(4);
+                    TimeUnit.NANOSECONDS.sleep(1);
                 } catch (InterruptedException e) {
                     e.printStackTrace();
                 }
@@ -2984,7 +1412,7 @@ public class MCP2210Driver {
                              final byte[] spiDataRx) {
 
         /* Setup a buffer with command */
-        byte[] cmdData = new byte[64];
+
         /* Write SPI data */
         cmdData[Mcp2210Constants.PKT_INDX_CMD] = Mcp2210Constants.CMD_SPI_TXFER_DATA;
         /* Number of bytes to send in SPI transaction */
@@ -2998,26 +1426,21 @@ public class MCP2210Driver {
         }
         /* Write the command to the device */
         boolean writeResult = false;
-        boolean readResult = false;
-        ByteBuffer command = ByteBuffer.wrap(cmdData);
+
         ByteBuffer response = mcpConnection.sendData(command);
         if (response != null) {
             writeResult = true;
-            readResult = true;
         }
         /* Check for error */
         if (!writeResult) {
             return Mcp2210Constants.ERROR_DEV_WRITE_FAILED;
         }
         /* Retrieve the data sent from the device to the host -- Error checking */
-        byte[] rxData = new byte[64];
         for (int i = 0; i < response.capacity(); i++) {
             rxData[i] = response.get(i);
         }
         /* Check for error */
-        if (!readResult) {
-            return Mcp2210Constants.ERROR_DEV_READ_FAILED;
-        } else if (rxData[Mcp2210Constants.PKT_INDX_CMD] != cmdData[Mcp2210Constants.PKT_INDX_CMD]) {
+        if (rxData[Mcp2210Constants.PKT_INDX_CMD] != cmdData[Mcp2210Constants.PKT_INDX_CMD]) {
             /* Error: command byte wasn't echoed back. */
             return Mcp2210Constants.ERROR_CMD_NOT_ECHOED;
         } else if (rxData[Mcp2210Constants.PKT_INDX_CMD_RET_CODE]
@@ -3053,5 +1476,21 @@ public class MCP2210Driver {
             /* Return the spi state in the return code */
             return spiState;
         }
+    }
+
+    public int getmCsToDataDly() {
+        return mCsToDataDly;
+    }
+
+    public int getmDataToDataDly() {
+        return mDataToDataDly;
+    }
+
+    public int getmDataToCsDly() {
+        return mDataToCsDly;
+    }
+
+    public int getmBaudRate() {
+        return mBaudRate;
     }
 }

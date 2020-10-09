@@ -41,17 +41,62 @@ class Status: BitConfig() {
         get() = bits[20]
         set(value) { bits[20] = value }
 
-    var fstint : Boolean
+    var ecgFastRecoveryMode : Boolean
         get() = bits[21]
         set(value) { bits[21] = value }
 
-    var eovf : Boolean
+    var ecgFIFOOverflow : Boolean
         get() = bits[22]
         set(value) { bits[22] = value }
 
-    var eint : Boolean
+    var ecgFIFOInterrupt : Boolean
         get() = bits[23]
         set(value) { bits[23] = value }
 
     // reserved 8 bits
+
+    fun read(data: UInt) {
+        var value = data
+        loff_nl = readBit(value)
+        value = value shr 1
+        loff_nh = readBit(value)
+        value = value shr 1
+        loff_pl = readBit(value)
+        value = value shr 1
+        loff_ph = readBit(value)
+        value = value shr 5
+        pllint = readBit(value)
+        value = value shr 1
+        samp = readBit(value)
+        value = value shr 1
+        rrint = readBit(value)
+        value = value shr 1
+        lonint = readBit(value)
+        value = value shr 9
+        dcloffint = readBit(value)
+        value = value shr 1
+        ecgFastRecoveryMode = readBit(value)
+        value = value shr 1
+        ecgFIFOOverflow = readBit(value)
+        value = value shr 1
+        ecgFIFOInterrupt = readBit(value)
+    }
+
+    override fun toString(): String {
+        return "Status(" +
+                "loff_nl: $loff_nl," +
+                "loff_nh: $loff_nl," +
+                "loff_pl: $loff_pl," +
+                "loff_ph: $loff_ph," +
+                "pllint: $pllint," +
+                "samp: $samp," +
+                "rrint: $rrint," +
+                "lonint: $lonint," +
+                "dcloffint: $dcloffint," +
+                "ecgFastRecoveryMode: $ecgFastRecoveryMode," +
+                "ecgFIFOOverflow: $ecgFIFOOverflow," +
+                "ecgFIFOInterrupt: $ecgFIFOInterrupt)"
+    }
+
+
 }

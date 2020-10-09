@@ -1,24 +1,26 @@
 package xyz.dma.ecg_usb
 
-import xyz.dma.ecg_usb.config.ECGConfiguration
-import xyz.dma.ecg_usb.config.GeneralConfiguration
-import xyz.dma.ecg_usb.config.MuxConfiguration
-import xyz.dma.ecg_usb.config.RtoR1Configuration
+import xyz.dma.ecg_usb.config.*
 import xyz.dma.ecg_usb.microchipusb.ExchangeType
 import xyz.dma.ecg_usb.microchipusb.MCP2210Driver
 import xyz.dma.ecg_usb.microchipusb.Mcp2210Constants
 import java.nio.ByteBuffer
 import java.nio.IntBuffer
-import java.util.concurrent.TimeUnit.MILLISECONDS
 
 
-class MAX30003Driver(private val driver: MCP2210Driver,
-                     private val logger: (String) -> Unit) {
+class MAX30003Driver(
+    private val driver: MCP2210Driver,
+    private val logger: (String) -> Unit
+) {
+    private val exchangeArray = ByteArray(64)
+    private var exchangeBuffer = ByteBuffer.wrap(exchangeArray)
+    private val dataArray = ByteArray(64)
+    private val dataBuffer = ByteBuffer.wrap(dataArray)
+
     companion object {
         const val WRITE_REGISTER = 0x00
         const val READ_REGISTER = 0x01
 
-        const val EINT_STATUS =  0x800000u
         const val NO_OP = 0x00
         const val STATUS = 0x01
         const val EN_INT = 0x02
@@ -46,8 +48,19 @@ class MAX30003Driver(private val driver: MCP2210Driver,
     private val defaultGpioDirection: IntBuffer = IntBuffer.allocate(1)
 
     fun open() {
+        driver.setSpiTxferSize(ExchangeType.CURRENT_SETTINGS_ONLY, 4, 1000 * 1000 * 12)
+
         turnOffBoard()
         swReset()
+        fifoReset()
+        if(driver.getCurrentSpiTxferSettings() == Mcp2210Constants.SUCCESSFUL) {
+            logger("Delay CS: ${driver.getmCsToDataDly()}")
+            logger("Delay data to CS: ${driver.getmDataToCsDly()}")
+            logger("Delay data to data: ${driver.getmDataToDataDly()}")
+            logger("Baud rate: ${driver.getmBaudRate()}")
+        } else {
+            logger("Error get delays")
+        }
 
         logger("Start configure")
         // General config register setting
@@ -63,11 +76,16 @@ class MAX30003Driver(private val driver: MCP2210Driver,
         logger("End configure CNFG_GEN: ${CNFG_GEN_r.toInt().toString(16)}")
         var inMemory = readRegister(CNFG_GEN)
         CNFG_GEN_r.read(inMemory)
-        logger("In memory CNFG_GEN: ${inMemory.toString(16)} $CNFG_GEN_r")
-        MILLISECONDS.sleep(100)
+        logger("In memory CNFG_GEN: ${inMemory.toString(16)}")
 
-        writeRegister(CNFG_CAL, 0x720000)  // 0x700000
-        MILLISECONDS.sleep(100)
+        //writeRegister(CNFG_CAL, 0x720000)  // 0x700000
+
+        // MUX Config
+        val CNFG_MUX_r = MuxConfiguration()
+        CNFG_MUX_r.calibrationECGN = 3 // was (3)
+        CNFG_MUX_r.calibrationECGP = 2 // was (2)
+        writeRegister(CNFG_EMUX, CNFG_MUX_r.toInt())
+        logger("End configure CNFG_EMUX: ${CNFG_MUX_r.toInt().toString(16)}")
 
         // ECG Config register setting
         val CNFG_ECG_r = ECGConfiguration()
@@ -79,8 +97,7 @@ class MAX30003Driver(private val driver: MCP2210Driver,
         logger("End configure CNFG_ECG: ${CNFG_ECG_r.toInt().toString(16)}")
         inMemory = readRegister(CNFG_ECG)
         CNFG_ECG_r.read(inMemory)
-        logger("In memory CNFG_ECG: ${inMemory.toString(16)} $CNFG_ECG_r")
-        MILLISECONDS.sleep(100)
+        logger("In memory CNFG_ECG: ${inMemory.toString(16)}")
 
         //R-to-R configuration
         val CNFG_RTOR_r = RtoR1Configuration()
@@ -91,14 +108,13 @@ class MAX30003Driver(private val driver: MCP2210Driver,
         CNFG_RTOR_r.enableRTOR = true // Enable R-to-R detection
         writeRegister(CNFG_RTOR1, CNFG_RTOR_r.toInt())
         logger("End configure CNFG_RTOR1: ${CNFG_RTOR_r.toInt().toString(16)}")
-        MILLISECONDS.sleep(100)
 
         //Manage interrupts register setting
-        /*val MNG_INT_r = ManageInterrupts()
-        MNG_INT_r.efit = 3 // Assert EINT w/ 4 unread samples
+        val MNG_INT_r = ManageInterrupts()
+        MNG_INT_r.efit = 0 // Assert EINT w/ 4 unread samples
         MNG_INT_r.clr_rrint = 1 // Clear R-to-R on RTOR reg. read back
         writeRegister(MNGR_INT, MNG_INT_r.toInt())
-        logger("End configure MNGR_INT: ${MNG_INT_r.toInt().toString(16)}")*/
+        logger("End configure MNGR_INT: ${MNG_INT_r.toInt().toString(16)}")
 
         //Enable interrupts register setting
         /*val EN_INT_r = EnableInterrupts()
@@ -114,16 +130,12 @@ class MAX30003Driver(private val driver: MCP2210Driver,
         writeRegister(MNGR_DYN, MNG_DYN_r.toInt())
         logger("End configure MNGR_DYN: ${MNG_DYN_r.toInt().toString(16)}")*/
 
-        // MUX Config
-        val CNFG_MUX_r = MuxConfiguration()
-        CNFG_MUX_r.calibrationECGN = 3 // was (3)
-        CNFG_MUX_r.calibrationECGP = 2 // was (2)
-        writeRegister(CNFG_EMUX, CNFG_MUX_r.toInt())
-        logger("End configure CNFG_EMUX: ${CNFG_MUX_r.toInt().toString(16)}")
-        MILLISECONDS.sleep(100)
 
-        sendSynch()
+        //sendSynch()
+
         logger("End configure")
+        updateConfigs()
+        //turnOnBoard()
         /*
         writeRegister(CNFG_GEN, 0x081007)
         MILLISECONDS.sleep(100)
@@ -140,28 +152,27 @@ class MAX30003Driver(private val driver: MCP2210Driver,
     }
 
     fun readRegister(address: Int): UInt {
-        turnOnBoard()
-        val txValue = driver.getSpiTxferSize(ExchangeType.CURRENT_SETTINGS_ONLY)
-        driver.setSpiTxferSize(ExchangeType.CURRENT_SETTINGS_ONLY, 4)
-
         val spiTXBuffer: Int = (address shl 1) or READ_REGISTER
-        val buffer = ByteArray(64)
-        val dataBuffer = ByteArray(64)
-        buffer[0] = spiTXBuffer.toByte()
-        buffer[1] = 0xFF.toByte()
-        buffer[2] = 0xFF.toByte()
-        buffer[3] = 0xFF.toByte()
-        val responseCode = driver.txferSpiData(buffer, dataBuffer)
+        exchangeArray[0] = spiTXBuffer.toByte()
+
+        turnOnBoard()
+        //logger("3 ${System.currentTimeMillis() - now}")
+        val responseCode = driver.txferSpiDataBuf(exchangeBuffer, dataBuffer)
+        //logger("4 ${System.currentTimeMillis() - now}")
+        turnOffBoard()
+
         if(responseCode != Mcp2210Constants.SUCCESSFUL) {
             throw RuntimeException("Read data exception: $responseCode")
         }
-        logger("Incoming data: ${dataBuffer[0]} ${dataBuffer[1]} ${dataBuffer[2]} ${dataBuffer[3]}")
-        val data = ((dataBuffer[1] + 0u) shl 16) or
-                ((dataBuffer[2] + 0u) shl 8) or
-                ((dataBuffer[3] + 0u))
+        //logger("Incoming data: ${dataBuffer[0]} ${dataBuffer[1]} ${dataBuffer[2]} ${dataBuffer[3]}")
 
-        driver.setSpiTxferSize(ExchangeType.CURRENT_SETTINGS_ONLY, txValue)
-        turnOffBoard()
+        var data = dataBuffer[1] + 0u
+        data = data shl 8
+        data = data or (dataBuffer[2] + 0u)
+        data = data shl 8
+        data = data or (dataBuffer[3] + 0u)
+
+        //logger("6 ${System.currentTimeMillis() - now}")
         return data
     }
 
@@ -169,27 +180,25 @@ class MAX30003Driver(private val driver: MCP2210Driver,
         writeRegister(SW_RST, 0x000000)
     }
 
-    fun writeRegister(address: Int, data: Int) {
-        turnOnBoard()
+    fun fifoReset() {
+        writeRegister(FIFO_RST, 0x000000)
+    }
 
+    fun writeRegister(address: Int, data: Int) {
         // now combine the register address and the command into one byte:
         val dataToSend = (address shl 1) or WRITE_REGISTER
 
-        MILLISECONDS.sleep(2)
-        val buffer = ByteBuffer.wrap(ByteArray(64))
-        buffer.put(dataToSend.toByte())
-        buffer.put((data shr 16).toByte())
-        buffer.put((data shr 8).toByte())
-        buffer.put(data.toByte())
+        exchangeArray[0] = dataToSend.toByte()
+        exchangeArray[1] = (data ushr 16).toByte()
+        exchangeArray[2] = (data ushr 8).toByte()
+        exchangeArray[3] = data.toByte()
 
-        driver.txferSpiData(buffer.array(), ByteArray(64))
-        MILLISECONDS.sleep(2)
-
+        turnOnBoard()
+        driver.txferSpiDataBuf(exchangeBuffer, dataBuffer)
         turnOffBoard()
     }
 
-    private fun turnOnBoard() {
-        updateConfigs()
+    fun turnOnBoard() {
         // Made output mode
         val defaultGpioDirectionVal = defaultGpioDirection[0] and 0xFE
         // Turn on chip
@@ -198,8 +207,7 @@ class MAX30003Driver(private val driver: MCP2210Driver,
         driver.setGpConfig(ExchangeType.CURRENT_SETTINGS_ONLY, gpPinDes, defaultGpioOutputVal, defaultGpioDirectionVal)
     }
 
-    private fun turnOffBoard() {
-        updateConfigs()
+    fun turnOffBoard() {
         // Made output mode
         val defaultGpioDirectionVal = defaultGpioDirection[0] and 0xFE
         // Turn on chip

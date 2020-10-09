@@ -8,7 +8,8 @@ import android.hardware.usb.UsbManager
 import java.util.*
 
 class MCPConnectionFactory(private val mUsbManager: UsbManager,
-                           private val permissionIntent: PendingIntent
+                           private val permissionIntent: PendingIntent,
+                           private val averager: (Long) -> Unit
 ) {
 
     fun openConnection(type: DeviceType) : MCPConnection? {
@@ -40,7 +41,7 @@ class MCPConnectionFactory(private val mUsbManager: UsbManager,
                     throw IllegalAccessException("No USB permission")
                 }
 
-                return MCPConnection(type.packetSize, mMcp2210Connection, hidInterface)
+                return MCPConnection(type.packetSize, mMcp2210Connection, hidInterface, averager)
             }
         }
         return null

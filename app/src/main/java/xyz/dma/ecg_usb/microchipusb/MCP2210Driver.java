@@ -891,20 +891,10 @@ public class MCP2210Driver {
     /**
      * Set the current chip settings.
      *
-     * @param initialGpioPinDes            (byte[]) [IN] PIN designations for the GPIO pins
-     * @param initialDefaultGpioOutput     (int) [IN] Default GPIO output
-     * @param initialDefaultGpioDir        (int) [IN] Default GPIO direction
-     * @param initialSpiBusRelEnable       (byte) [IN] SPI Bus release enable
-     * @param initialRmtWkupEn             (byte) [IN] Remote wake-up enable
-     * @param initialInterruptPinMd        (byte) [IN] Interrupt mode
      * @return (int) Error code. Indicates if the operation was successful or not.
      * 0 = successful. other = failed
      */
-    public final int setCurrentChipSettings(final byte[] initialGpioPinDes,
-                                            final int initialDefaultGpioOutput, final int initialDefaultGpioDir,
-                                            final byte initialSpiBusRelEnable,
-                                            final byte initialRmtWkupEn, final byte initialInterruptPinMd) {
-
+    public final int setCurrentChipSettings() {
         /* Setup a buffer with command */
         cmdData[Mcp2210Constants.PKT_INDX_CMD] = Mcp2210Constants.CMD_SETTINGS_WRITE;
         /* Write current settings command */
@@ -913,19 +903,19 @@ public class MCP2210Driver {
         cmdData[2] = 0x00;
         cmdData[3] = 0x00;
         /* Set the GPIO pin designations */
-        System.arraycopy(initialGpioPinDes, 0, cmdData, 4, 9);
+        System.arraycopy(mGpPinDes, 0, cmdData, 4, 9);
         /* Set GPIO default output */
         // low byte
-        cmdData[13] = (byte) ((initialDefaultGpioOutput << 8) >> 8);
+        cmdData[13] = (byte) ((mGpioDefaultOutput << 8) >> 8);
         // high byte
-        cmdData[14] = (byte) (initialDefaultGpioOutput >> 8);
+        cmdData[14] = (byte) (mGpioDefaultOutput >> 8);
         /* Set GPIO default direction */
         // low byte
-        cmdData[15] = (byte) ((initialDefaultGpioDir << 8) >> 8);
+        cmdData[15] = (byte) ((mGpioDefaultDir << 8) >> 8);
         // high byte
-        cmdData[16] = (byte) (initialDefaultGpioDir >> 8);
+        cmdData[16] = (byte) (mGpioDefaultDir >> 8);
         /* Set other chip settings */
-        cmdData[17] = (byte) (initialRmtWkupEn | initialInterruptPinMd | initialSpiBusRelEnable);
+        cmdData[17] = (byte) (mRmtWkupEn | mInterruptPinMd | mSpiBusRelEnable);
         /* Write the command to the device */
 
         ByteBuffer response = mcpConnection.sendData(command);
@@ -1140,8 +1130,7 @@ public class MCP2210Driver {
                 mGpPinDes[i] = gpPinDes.get(i);
             }
             /* Set the current settings */
-            result = setCurrentChipSettings(mGpPinDes, mGpioDefaultOutput, mGpioDefaultDir,
-                            mSpiBusRelEnable, mRmtWkupEn, mInterruptPinMd);
+            result = setCurrentChipSettings();
             if (result != Mcp2210Constants.SUCCESSFUL) {
                 if (DEBUG) {
                     return Mcp2210Constants.ERROR_LOC_PART1 + Mcp2210Constants.ERROR_LOC_SUBPART2
@@ -1408,7 +1397,7 @@ public class MCP2210Driver {
      * Notes: The three possible success states are as follows: -SPI Transfer Done 0x10 -SPI
      * Transfer Started 0x20 -SPI Transfer Pending 0x30
      */
-    private int makeSpiTxfer(final byte[] spiDataTx, final int numBytes,
+    public int makeSpiTxfer(final byte[] spiDataTx, final int numBytes,
                              final byte[] spiDataRx) {
 
         /* Setup a buffer with command */
@@ -1425,14 +1414,9 @@ public class MCP2210Driver {
             System.arraycopy(spiDataTx, 0, cmdData, 4, numBytes);
         }
         /* Write the command to the device */
-        boolean writeResult = false;
-
         ByteBuffer response = mcpConnection.sendData(command);
-        if (response != null) {
-            writeResult = true;
-        }
         /* Check for error */
-        if (!writeResult) {
+        if (response == null) {
             return Mcp2210Constants.ERROR_DEV_WRITE_FAILED;
         }
         /* Retrieve the data sent from the device to the host -- Error checking */
@@ -1443,16 +1427,13 @@ public class MCP2210Driver {
         if (rxData[Mcp2210Constants.PKT_INDX_CMD] != cmdData[Mcp2210Constants.PKT_INDX_CMD]) {
             /* Error: command byte wasn't echoed back. */
             return Mcp2210Constants.ERROR_CMD_NOT_ECHOED;
-        } else if (rxData[Mcp2210Constants.PKT_INDX_CMD_RET_CODE]
-                == Mcp2210Constants.SPI_ERR_TXFER_IN_PROG) {
+        } else if (rxData[Mcp2210Constants.PKT_INDX_CMD_RET_CODE] == Mcp2210Constants.SPI_ERR_TXFER_IN_PROG) {
             /* Error: SPI transfer in progress */
             return Mcp2210Constants.ERROR_SPI_TXFER_IN_PROGRESS;
-        } else if (rxData[Mcp2210Constants.PKT_INDX_CMD_RET_CODE]
-                == Mcp2210Constants.SPI_ERR_SPI_BUS_NOT_AVAIL) {
+        } else if (rxData[Mcp2210Constants.PKT_INDX_CMD_RET_CODE] == Mcp2210Constants.SPI_ERR_SPI_BUS_NOT_AVAIL) {
             /* Error: SPI bus not available */
             return Mcp2210Constants.ERROR_SPI_BUS_NOT_AVAILABLE;
-        } else if (rxData[Mcp2210Constants.PKT_INDX_CMD_RET_CODE]
-                != Mcp2210Constants.SUCCESSFUL) {
+        } else if (rxData[Mcp2210Constants.PKT_INDX_CMD_RET_CODE] != Mcp2210Constants.SUCCESSFUL) {
             /* Unknown error, return the exact value. */
             return rxData[Mcp2210Constants.PKT_INDX_CMD_RET_CODE];
         } else {
@@ -1460,11 +1441,9 @@ public class MCP2210Driver {
             /* There are 3 possible states */
             if (rxData[Mcp2210Constants.PKT_INDX_SPI_BUS_STATUS] == Mcp2210Constants.SPI_OPS_XFER_DONE) {
                 spiState = Mcp2210Constants.SPI_STATE_TXFER_DONE;
-            } else if (rxData[Mcp2210Constants.PKT_INDX_SPI_BUS_STATUS]
-                    == Mcp2210Constants.SPI_OPS_XFER_START) {
+            } else if (rxData[Mcp2210Constants.PKT_INDX_SPI_BUS_STATUS] == Mcp2210Constants.SPI_OPS_XFER_START) {
                 spiState = Mcp2210Constants.SPI_STATE_TXFER_START;
-            } else if (rxData[Mcp2210Constants.PKT_INDX_SPI_BUS_STATUS]
-                    == Mcp2210Constants.SPI_OPS_XFER_PENDING) {
+            } else if (rxData[Mcp2210Constants.PKT_INDX_SPI_BUS_STATUS] == Mcp2210Constants.SPI_OPS_XFER_PENDING) {
                 spiState = Mcp2210Constants.SPI_STATE_TXFER_PENDING;
             } else {
                 /* Error if this is reached */

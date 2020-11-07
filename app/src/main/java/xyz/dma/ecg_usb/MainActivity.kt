@@ -11,26 +11,34 @@ import android.view.View
 import android.widget.Button
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.FileProvider
 import com.jjoe64.graphview.GraphView
 import com.jjoe64.graphview.series.DataPoint
 import com.jjoe64.graphview.series.LineGraphSeries
 import xyz.dma.ecg_usb.MAX30003Driver.Companion.ECG_FIFO
-import xyz.dma.ecg_usb.config.Status
 import xyz.dma.ecg_usb.microchipusb.DeviceType
 import xyz.dma.ecg_usb.microchipusb.MCP2210Driver
 import xyz.dma.ecg_usb.microchipusb.MCPConnection
 import xyz.dma.ecg_usb.microchipusb.MCPConnectionFactory
+import java.io.File
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.LinkedBlockingQueue
-import java.util.concurrent.TimeUnit
 import kotlin.math.max
 
 
+@ExperimentalUnsignedTypes
 class MainActivity : AppCompatActivity() {
     private val ACTION_USB_PERMISSION = "xyz.dma.ecg_usb.USB_PERMISSION"
     private lateinit var series: LineGraphSeries<DataPoint>
-    private var ecgType = 0
-    private val ecgPoints = LinkedBlockingQueue<Double>()
-    private var avgWriteTime = 0L
+    private var workingThread: Thread? = null
+    private var mcpConnection: MCPConnection? = null
+    private val ecgPoints = LinkedBlockingQueue<UInt>()
+    private val recordedPoints = CopyOnWriteArrayList<Double>()
+    private var recordOn: Boolean = false
+    @Volatile
+    private var etagResponse7 = 0
+    @Volatile
+    private var otherError = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -52,85 +60,33 @@ class MainActivity : AppCompatActivity() {
             )
 
             val usbManager = this.getSystemService(Context.USB_SERVICE) as UsbManager
-            val factory = MCPConnectionFactory(usbManager, permissionIntent) {
-                avgWriteTime = it
-            }
-
             val filter = IntentFilter(ACTION_USB_PERMISSION)
 
             filter.addAction(UsbManager.ACTION_USB_DEVICE_DETACHED)
             filter.addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED)
+
             registerReceiver(object : BroadcastReceiver() {
                 override fun onReceive(context: Context?, intent: Intent?) {
                     when (intent?.action) {
                         ACTION_USB_PERMISSION -> {
-                            log(ACTION_USB_PERMISSION)
-                            try {
-                                var connection: MCPConnection?
-                                try {
-                                    connection = factory.openConnection(DeviceType.MCP2210)
-                                    if (connection == null) {
-                                        log("Connection exception")
-                                        return
-                                    }
-                                } catch (e: java.lang.Exception) {
-                                    log(e.message.toString())
-                                    log(e.stackTraceToString())
-                                    connection = factory.openConnection(DeviceType.MCP2210)
-                                    if (connection == null) {
-                                        log("Connection exception")
-                                        return
-                                    }
-                                }
-                                val driver = MCP2210Driver(connection) { t: String -> log(t) }
-                                val maxDriver = MAX30003Driver(driver,{ a -> log(a) })
-                                maxDriver.open()
-                                Thread {
-                                    max30003Read(maxDriver)
-                                }.start()
-                            } catch (e: Exception) {
-                                log(e.message ?: "null 1")
-                                log(e.stackTraceToString())
-                            }
+                            connectEcg(usbManager, permissionIntent)
                         }
-                        UsbManager.ACTION_USB_ACCESSORY_DETACHED -> {
-                            log("Usb detached")
+                        UsbManager.ACTION_USB_DEVICE_DETACHED -> {
+                            mcpConnection?.close()
+                            mcpConnection = null
+                            val wThread = workingThread
+                            if (wThread != null && !wThread.isInterrupted) {
+                                workingThread?.interrupt()
+                            }
                         }
                         UsbManager.ACTION_USB_DEVICE_ATTACHED -> {
-                            try {
-
-                                var connection: MCPConnection?
-                                try {
-                                    connection = factory.openConnection(DeviceType.MCP2210)
-                                    if (connection == null) {
-                                        log("Connection exception")
-                                        return
-                                    }
-                                } catch (e: java.lang.Exception) {
-                                    log(e.message.toString())
-                                    log(e.stackTraceToString())
-                                    connection = factory.openConnection(DeviceType.MCP2210)
-                                    if (connection == null) {
-                                        log("Connection exception")
-                                        return
-                                    }
-                                }
-                                val driver = MCP2210Driver(connection, { log(it) })
-                                val maxDriver = MAX30003Driver(driver,{ a -> log(a) })
-                                maxDriver.open()
-
-                                Thread {
-                                    max30003Read(maxDriver)
-                                }.start()
-                            } catch (e: Exception) {
-                                log(e.message ?: "null 2")
-                                log(e.stackTraceToString())
-                            }
+                            connectEcg(usbManager, permissionIntent)
                         }
                     }
                 }
             }, filter)
 
+            connectEcg(usbManager, permissionIntent)
         } catch (e: Exception) {
             log(e.message ?: "null message exception")
             log(e.stackTraceToString())
@@ -138,131 +94,74 @@ class MainActivity : AppCompatActivity() {
 
         Thread {
             var count = 0L
+            var wasPoint: Double? = null
             while (!Thread.interrupted()) {
-                val point = ecgPoints.take()
+                val egcData = ecgPoints.take()
+                val point = ((((egcData shr 8).toShort()).toInt() shl 2) or (egcData and 0b11u).toInt()).toDouble()
+                if(wasPoint == null || wasPoint != point) {
+                    wasPoint = point
+                } else if(wasPoint == point) {
+                    wasPoint = null
+                    continue
+                }
+                if(recordOn) {
+                    recordedPoints.add(point)
+                }
                 addPoint(count++, point)
             }
         }.start()
+
     }
 
-    fun onTypeChane(view: View) {
-        ecgType = if(ecgType + 1 >= 7) 0 else ecgType + 1
-        (view as Button).text = "Type: $ecgType"
+    private fun connectEcg(usbManager: UsbManager, permissionIntent: PendingIntent) {
+        val factory = MCPConnectionFactory(usbManager, permissionIntent) { log(it) }
+
+        try {
+            try {
+                mcpConnection = factory.openConnection(DeviceType.MCP2210)
+                if (mcpConnection == null) {
+                    log("Connection exception")
+                    return
+                }
+            } catch (e: java.lang.Exception) {
+                log(e.message.toString())
+                log(e.stackTraceToString())
+                mcpConnection = factory.openConnection(DeviceType.MCP2210)
+                if (mcpConnection == null) {
+                    log("Connection exception")
+                    return
+                }
+            }
+            val driver = MCP2210Driver(mcpConnection) { log(it) }
+            val maxDriver = MAX30003Driver(driver) { a -> log(a) }
+            maxDriver.open()
+
+            workingThread = Thread {
+                max30003Read(maxDriver)
+            }
+            log("Start working thread")
+            workingThread?.start()
+        } catch (e: Exception) {
+            log(e.message ?: "null")
+            log(e.stackTraceToString())
+        }
     }
 
     private fun max30003Read(maxDriver: MAX30003Driver) {
-        // val time = System.currentTimeMillis()
-        //var lastRTORTime = time
-        var etagResponse7 = 0
-        var skippedInterrupts = 0
-        var skippedOverflow = 0
-        var otherError = 0
-        val ecgSamples = ArrayList<Number>()
-        //val rtorSamples = ArrayList<Float>()
-        //var hr = 0f
-        val status = Status()
-
-        var egcData: UInt
-        var ecgdata: Number
-
-        var startTime = System.currentTimeMillis()
-        var points = 0
-        var sps = 0L
-
         try {
             while (!Thread.interrupted()) {
-                status.read(maxDriver.readRegister(MAX30003Driver.STATUS))
-                if (!status.ecgFIFOInterrupt) {
-                    skippedInterrupts++
-                    continue
-                }
-                if (status.ecgFIFOOverflow) {
-                    maxDriver.fifoReset()
-                    skippedOverflow++
-                    continue
-                }
-
-                 do {
-                     val now = System.currentTimeMillis()
-                     egcData = maxDriver.readRegister(ECG_FIFO)
-                     ecgdata = when (ecgType) {
-                         0 -> {
-                             (egcData shr 8).toShort()
-                         }
-                         1 -> {
-                             (egcData shr 6).toShort()
-                         }
-                         2 -> {
-                             (((egcData shr 8).toShort()).toInt() shl 2) or (egcData and 0b11u).toInt()
-                         }
-                         3 -> {
-                             (egcData shr 8).toInt()
-                         }
-                         4 -> {
-                             (egcData shr 8).toInt() - (0xFFFF / 2)
-                         }
-                         5 -> {
-                             (egcData shr 6).toInt()
-                         }
-                         else -> {
-                             (egcData shr 6).toInt() - (0x3FFFF / 2)
-                         }
-                     }
-                     val etag = (egcData shr 3) and 0x7u
-                     if (etag != 0u && etag != 1u) {
-                         if (etag == 0x7u) {//FIFO_OVF
-                             etagResponse7++
-                             maxDriver.fifoReset()
-                             //maxDriver.sendSynch() // Reset FIFO
-                         } else {
-                             otherError++
-                         }
-                     } else {
-                         points++
-                         ecgPoints.add(ecgdata.toDouble())
-                     }
-
-                     if(now - startTime >= 1000) {
-                         sps = 1000 * points / (now - startTime)
-                         startTime = now
-                         points = 0
-                     }
-
-                     changeData("$etagResponse7 $skippedInterrupts $skippedOverflow $otherError " +
-                             "${System.currentTimeMillis() - now} $sps $avgWriteTime")
-
-                     //ecgSamples.add(ecgdata)
-                     //ecgData(ecgdata.toString())
-                 } while (etag == 0u || etag == 1u)
-                TimeUnit.MILLISECONDS.sleep(8)
-                /*if(now != lastECGTime) {
-                    var avg = 0.0
-                    for(v in ecgSamples) {
-                        avg += v.toDouble()
+                val egcData = maxDriver.readRegister(ECG_FIFO)
+                val etag = (egcData shr 3) and 0x7u
+                if (etag != 0u && etag != 1u && etag != 2u) {
+                    if (etag == 0x7u) {//FIFO_OVF
+                        etagResponse7++
+                        maxDriver.fifoReset()
+                    } else {
+                        otherError++
                     }
-                    avg /= ecgSamples.size
-                    addPoint(count++, avg)
-                    ecgSamples.clear()
-                    lastECGTime = now
-                }*/
-
-
-/*
-                val responseRtor = maxDriver.readRegister(RTOR) shr 10
-                rtorSamples.add(responseRtor.toFloat())
-
-                if(now - lastRTORTime > 100) {
-                    hr = 0f
-                    for(rtor in rtorSamples) {
-                        hr += rtor
-                    }
-                    hr /= rtorSamples.size
-                    hr *= (now - lastRTORTime) / 1000.0f
-                    hr = 60.0f / hr
-                    lastRTORTime = now
-                }*/
-
-                //changeData("$hr:$etagResponse7")
+                } else {
+                    ecgPoints.add(egcData)
+                }
             }
         } catch (e: Exception) {
             log(e.message ?: "null message")
@@ -277,58 +176,49 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun ecgData(text: String) {
-        val textView = findViewById<TextView>(R.id.egcTextView) ?: return
-        runOnUiThread {
-            textView.text = text
-        }
-    }
-
-    private fun changeData(text: String) {
-        val textView = findViewById<TextView>(R.id.dataTextView) ?: return
-        runOnUiThread {
-            textView.text = text
-        }
-    }
-
-    private fun addPoint(time:  Long, value: Double) {
+    private fun addPoint(time: Long, value: Double) {
         val graph = findViewById<View>(R.id.ecgGraph) as GraphView
         runOnUiThread {
-            series.appendData(DataPoint(time.toDouble(), value), true, 11200)
+            series.appendData(DataPoint(time.toDouble(), value), true, 2000)
             graph.viewport.setMinX(max(0, time - 128 * 5).toDouble())
             graph.viewport.setMaxX(max(128 * 5, time).toDouble())
-/*
-            when(ecgType) {
-                0 -> {
-                    graph.viewport.setMinY((Short.MIN_VALUE - 100).toDouble())
-                    graph.viewport.setMaxY((Short.MAX_VALUE + 100).toDouble())
-                }
-                1 -> {
-                    graph.viewport.setMinY((Short.MIN_VALUE - 100).toDouble())
-                    graph.viewport.setMaxY((Short.MAX_VALUE + 100).toDouble())
-                }
-                2 -> {
-                    graph.viewport.setMinY((Short.MIN_VALUE * 4 - 100).toDouble())
-                    graph.viewport.setMaxY((Short.MAX_VALUE * 4 + 100).toDouble())
-                }
-                3 -> {
-                    graph.viewport.setMinY(-100.0)
-                    graph.viewport.setMaxY((Short.MAX_VALUE + 100).toDouble())
-                }
-                4 -> {
-                    graph.viewport.setMinY((Short.MIN_VALUE - 100).toDouble())
-                    graph.viewport.setMaxY((Short.MAX_VALUE + 100).toDouble())
-                }
-                5 -> {
-                    graph.viewport.setMinY(-100.0)
-                    graph.viewport.setMaxY((Short.MAX_VALUE * 4 + 100).toDouble())
-                }
-                6 -> {
-                    graph.viewport.setMinY((Short.MIN_VALUE * 2 - 100).toDouble())
-                    graph.viewport.setMaxY((Short.MAX_VALUE * 2 + 100).toDouble())
-                }
-            }*/
         }
+    }
+
+    fun onStartButtonClick(view: View) {
+        recordOn = !recordOn
+        if(view is Button) {
+            if (recordOn) {
+                view.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_stop, 0, 0, 0)
+            } else {
+                view.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_play_arrow, 0, 0, 0)
+            }
+        }
+    }
+
+    fun onResetButtonClick(view: View) {
+        recordedPoints.clear()
+    }
+
+    fun onShareButtonClick(view: View) {
+        Thread {
+            val recordsPath = File(this@MainActivity.filesDir, "records")
+            if(!recordsPath.exists()) {
+                recordsPath.mkdirs()
+            }
+            val recordFile = File(recordsPath, "ecg-records-${System.currentTimeMillis()}.csv")
+            recordFile.writeText(recordedPoints.joinToString(separator = ",") { "$it" })
+
+            val intentShareFile = Intent(Intent.ACTION_SEND)
+            intentShareFile.type = "text/csv";
+            intentShareFile.putExtra(
+                Intent.EXTRA_STREAM,
+                FileProvider.getUriForFile(this@MainActivity, "xyz.dma.ecg_usb.FILE_PROVIDER", recordFile)
+            )
+            intentShareFile.putExtra(Intent.EXTRA_TEXT, "Share file...")
+
+            startActivity(Intent.createChooser(intentShareFile, "Сохранить результаты"))
+        }.start()
     }
 }
 

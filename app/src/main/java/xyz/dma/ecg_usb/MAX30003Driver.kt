@@ -48,7 +48,7 @@ class MAX30003Driver(
     private val defaultGpioDirection: IntBuffer = IntBuffer.allocate(1)
 
     fun open() {
-        driver.setSpiTxferSize(ExchangeType.CURRENT_SETTINGS_ONLY, 4, 1000 * 1000 * 12)
+        driver.setSpiTxferSize(ExchangeType.CURRENT_SETTINGS_ONLY,  4, 1000 * 1000 * 12)
 
         turnOffBoard()
         swReset()
@@ -61,6 +61,9 @@ class MAX30003Driver(
         } else {
             logger("Error get delays")
         }
+        updateConfigs()
+        gpPinDes.array()[0] = 0x01
+        driver.setGpConfig(ExchangeType.CURRENT_SETTINGS_ONLY, gpPinDes, defaultGpioOutput[0], defaultGpioDirection[0])
 
         logger("Start configure")
         // General config register setting
@@ -80,19 +83,17 @@ class MAX30003Driver(
 
         //writeRegister(CNFG_CAL, 0x720000)  // 0x700000
 
-        // MUX Config
-        val CNFG_MUX_r = MuxConfiguration()
-        CNFG_MUX_r.calibrationECGN = 3 // was (3)
-        CNFG_MUX_r.calibrationECGP = 2 // was (2)
-        writeRegister(CNFG_EMUX, CNFG_MUX_r.toInt())
-        logger("End configure CNFG_EMUX: ${CNFG_MUX_r.toInt().toString(16)}")
+        val CNFG_CAL_r = CalConfiguration()
+        CNFG_CAL_r.en_vcal = true
+        writeRegister(CNFG_CAL, CNFG_CAL_r.toInt())
+        logger("End configure CNFG_CAL: ${CNFG_CAL_r.toInt().toString(16)}")
 
         // ECG Config register setting
         val CNFG_ECG_r = ECGConfiguration()
         CNFG_ECG_r.digitalLowPassFilter = 0 // Digital LPF cutoff = 40Hz
         CNFG_ECG_r.digitalHighPassFilter = true // Digital HPF cutoff = 0.5Hz
         CNFG_ECG_r.gain = 1 // ECG gain = 40V/V
-        CNFG_ECG_r.rate = 2 // Sample rate = 128 sps
+        CNFG_ECG_r.rate = 0 // Sample rate = 128 sps
         writeRegister(CNFG_ECG, CNFG_ECG_r.toInt())
         logger("End configure CNFG_ECG: ${CNFG_ECG_r.toInt().toString(16)}")
         inMemory = readRegister(CNFG_ECG)
@@ -116,6 +117,13 @@ class MAX30003Driver(
         writeRegister(MNGR_INT, MNG_INT_r.toInt())
         logger("End configure MNGR_INT: ${MNG_INT_r.toInt().toString(16)}")
 
+        // MUX Config
+        val CNFG_MUX_r = MuxConfiguration()
+        CNFG_MUX_r.calibrationECGN = 3 // was (3)
+        CNFG_MUX_r.calibrationECGP = 2 // was (2)
+        writeRegister(CNFG_EMUX, CNFG_MUX_r.toInt())
+        logger("End configure CNFG_EMUX: ${CNFG_MUX_r.toInt().toString(16)}")
+
         //Enable interrupts register setting
         /*val EN_INT_r = EnableInterrupts()
         EN_INT_r.en_eint = true // Enable EINT interrupt
@@ -134,7 +142,7 @@ class MAX30003Driver(
         //sendSynch()
 
         logger("End configure")
-        updateConfigs()
+
         //turnOnBoard()
         /*
         writeRegister(CNFG_GEN, 0x081007)
@@ -147,30 +155,31 @@ class MAX30003Driver(
         MILLISECONDS.sleep(100)
 
         writeRegister(CNFG_RTOR1, 0x3fc600)
-        sendSynch()
         MILLISECONDS.sleep(100)*/
+        sendSynch()
     }
 
     fun readRegister(address: Int): UInt {
-        val spiTXBuffer: Int = (address shl 1) or READ_REGISTER
+        val spiTXBuffer = (address shl 1) or READ_REGISTER
         exchangeArray[0] = spiTXBuffer.toByte()
 
-        turnOnBoard()
+        //turnOnBoard()
         //logger("3 ${System.currentTimeMillis() - now}")
-        val responseCode = driver.txferSpiDataBuf(exchangeBuffer, dataBuffer)
+        //val responseCode = driver.txferSpiDataBuf(exchangeBuffer, dataBuffer)
+        val responseCode = driver.makeSpiTxfer(exchangeArray, 4, dataArray)
         //logger("4 ${System.currentTimeMillis() - now}")
-        turnOffBoard()
+        //turnOffBoard()
 
-        if(responseCode != Mcp2210Constants.SUCCESSFUL) {
+        /*if(responseCode != Mcp2210Constants.SUCCESSFUL) {
             throw RuntimeException("Read data exception: $responseCode")
-        }
+        }*/
         //logger("Incoming data: ${dataBuffer[0]} ${dataBuffer[1]} ${dataBuffer[2]} ${dataBuffer[3]}")
 
-        var data = dataBuffer[1] + 0u
+        var data = dataArray[1] + 0u
         data = data shl 8
-        data = data or (dataBuffer[2] + 0u)
+        data = data or (dataArray[2] + 0u)
         data = data shl 8
-        data = data or (dataBuffer[3] + 0u)
+        data = data or (dataArray[3] + 0u)
 
         //logger("6 ${System.currentTimeMillis() - now}")
         return data

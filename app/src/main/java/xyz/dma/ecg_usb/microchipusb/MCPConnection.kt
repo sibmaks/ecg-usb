@@ -8,8 +8,7 @@ import kotlin.concurrent.withLock
 class MCPConnection(
     private val packetSize: Int,
     private val usbDeviceConnection: UsbDeviceConnection,
-    private val usbInterface: UsbInterface,
-    private val averager: (Long) -> Unit) {
+    private val usbInterface: UsbInterface) {
 
     /** USB OUT endpoint. Used for sending commands to the MCP2210 via the HID interface.  */
     private lateinit var mMcp2210EpOut: UsbEndpoint
@@ -59,25 +58,19 @@ class MCPConnection(
             return null
         }
 
-        val time = System.currentTimeMillis()
-
-        try {
-            //accessLock.withLock {
-            // queue the USB command
-            usbOutRequest.queue(data, packetSize)
-            if (usbDeviceConnection.requestWait() == null) {
-                // an error has occurred
-                return null
-            }
-            usbInRequest.queue(usbResponse, packetSize)
-            return if (usbDeviceConnection.requestWait() == null) {
-                // an error has occurred
-                null
-            } else usbResponse
-        } finally {
-            averager(System.currentTimeMillis() - time)
+        //accessLock.withLock {
+        // queue the USB command
+        usbOutRequest.queue(data, packetSize)
+        if (usbDeviceConnection.requestWait() == null) {
+            // an error has occurred
+            return null
         }
-       // }
+        usbInRequest.queue(usbResponse, packetSize)
+        return if (usbDeviceConnection.requestWait() == null) {
+            // an error has occurred
+            null
+        } else usbResponse
+        // }
     }
 
     /**

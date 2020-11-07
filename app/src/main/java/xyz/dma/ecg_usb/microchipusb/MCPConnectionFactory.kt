@@ -9,18 +9,22 @@ import java.util.*
 
 class MCPConnectionFactory(private val mUsbManager: UsbManager,
                            private val permissionIntent: PendingIntent,
-                           private val averager: (Long) -> Unit
+                           private val logger: (String) -> Unit
 ) {
 
     fun openConnection(type: DeviceType) : MCPConnection? {
         val deviceList: HashMap<String, UsbDevice> = mUsbManager.deviceList
-        println(deviceList)
         for (device in deviceList.entries) {
             val mMcp2210Device = device.value
             if (mMcp2210Device.vendorId == type.vid && mMcp2210Device.productId == type.pid) {
                 // we found the MCP2210
                 // Now go through the interfaces until we find the HID one
                 var hidInterface: UsbInterface? = null
+                logger("Interfaced: " + mMcp2210Device.interfaceCount.toString())
+                for (i in 0 until mMcp2210Device.interfaceCount) {
+                    val mMcp2210Interface = mMcp2210Device.getInterface(i)
+                    logger(mMcp2210Interface.toString())
+                }
                 for (i in 0 until mMcp2210Device.interfaceCount) {
                     val mMcp2210Interface = mMcp2210Device.getInterface(i)
                     if (mMcp2210Interface.interfaceClass == UsbConstants.USB_CLASS_HID) {
@@ -41,7 +45,7 @@ class MCPConnectionFactory(private val mUsbManager: UsbManager,
                     throw IllegalAccessException("No USB permission")
                 }
 
-                return MCPConnection(type.packetSize, mMcp2210Connection, hidInterface, averager)
+                return MCPConnection(type.packetSize, mMcp2210Connection, hidInterface)
             }
         }
         return null

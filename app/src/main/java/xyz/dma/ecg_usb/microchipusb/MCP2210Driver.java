@@ -1,9 +1,10 @@
 package xyz.dma.ecg_usb.microchipusb;
 
+import android.os.Build;
+
 import java.nio.ByteBuffer;
 import java.nio.CharBuffer;
 import java.nio.IntBuffer;
-import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 public class MCP2210Driver {
@@ -20,6 +21,7 @@ public class MCP2210Driver {
      */
     private final MCPConnection mcpConnection;
     private final Consumer<String> logger;
+    private final Consumer<Long> last2ndRequest;
 
     /* SPI TRANSFER SETTINGS */
     /**
@@ -95,9 +97,12 @@ public class MCP2210Driver {
      *
      * @param mcpConnection (MCP2210)    A reference to an MCP2210 object
      */
-    public MCP2210Driver(final MCPConnection mcpConnection, Consumer<String> logger) {
+    public MCP2210Driver(final MCPConnection mcpConnection,
+                         Consumer<String> logger,
+                         Consumer<Long> last2ndRequest) {
         this.mcpConnection = mcpConnection;
         this.logger = logger;
+        this.last2ndRequest = last2ndRequest;
     }
 
     /**
@@ -311,12 +316,9 @@ public class MCP2210Driver {
         /* Declare local variables */
         int result;
         /* Based off of whichToSet, determine which settings to grab as the 'base' */
-        if (whichToSet == ExchangeType.CURRENT_SETTINGS_ONLY
-                || whichToSet == ExchangeType.BOTH) {
+        if (whichToSet == ExchangeType.CURRENT_SETTINGS_ONLY || whichToSet == ExchangeType.BOTH) {
             /* Get the current settings */
-            result =
-                    getCurrentSpiTxferSettings(
-                    );
+            result = getCurrentSpiTxferSettings();
             if (result != Mcp2210Constants.SUCCESSFUL) {
                 if (DEBUG) {
                     return Mcp2210Constants.ERROR_LOC_PART1 + Mcp2210Constants.ERROR_LOC_SUBPART1
@@ -329,26 +331,21 @@ public class MCP2210Driver {
             mTxferSize = txferSizeSet;
             mBaudRate = baudRate;
             /* Set the current settings. */
-            result = setCurrentSpiTxferSettings(mBaudRate, mIdleCsVal, mActiveCsVal, mCsToDataDly,
-                            mDataToDataDly, mDataToCsDly, mTxferSize, mSpiMd);
+            result = setCurrentSpiTxferSettings();
             if (result != Mcp2210Constants.SUCCESSFUL) {
                 if (DEBUG) {
-                    return Mcp2210Constants.ERROR_LOC_PART1 + Mcp2210Constants.ERROR_LOC_SUBPART2
-                            + result;
+                    return Mcp2210Constants.ERROR_LOC_PART1 + Mcp2210Constants.ERROR_LOC_SUBPART2 + result;
                 } else {
                     return result;
                 }
             }
         }
-        if (whichToSet == ExchangeType.POWER_UP_DEFAULTS_ONLY
-                || whichToSet == ExchangeType.BOTH) {
+        if (whichToSet == ExchangeType.POWER_UP_DEFAULTS_ONLY || whichToSet == ExchangeType.BOTH) {
             /* Get the power-up defaults */
-            result =
-                    getPwrUpSpiTxferSettings();
+            result = getPwrUpSpiTxferSettings();
             if (result != Mcp2210Constants.SUCCESSFUL) {
                 if (DEBUG) {
-                    return Mcp2210Constants.ERROR_LOC_PART2 + Mcp2210Constants.ERROR_LOC_SUBPART1
-                            + result;
+                    return Mcp2210Constants.ERROR_LOC_PART2 + Mcp2210Constants.ERROR_LOC_SUBPART1 + result;
                 } else {
                     return result;
                 }
@@ -356,13 +353,10 @@ public class MCP2210Driver {
             /* Set the new settings to the local variable. */
             mTxferSize = txferSizeSet;
             /* Set the power-up defaults. */
-            result =
-                    setPwrUpSpiTxferSettings(mBaudRate, mIdleCsVal, mActiveCsVal, mCsToDataDly,
-                            mDataToDataDly, mDataToCsDly, mTxferSize, mSpiMd);
+            result = setPwrUpSpiTxferSettings();
             if (result != Mcp2210Constants.SUCCESSFUL) {
                 if (DEBUG) {
-                    return Mcp2210Constants.ERROR_LOC_PART2 + Mcp2210Constants.ERROR_LOC_SUBPART2
-                            + result;
+                    return Mcp2210Constants.ERROR_LOC_PART2 + Mcp2210Constants.ERROR_LOC_SUBPART2 + result;
                 } else {
                     return result;
                 }
@@ -439,22 +433,11 @@ public class MCP2210Driver {
     /**
      * Set the power-up SPI parameter information.
      *
-     * @param pwrBaudRate      (int) [IN] Power-up SPI bit rate speed
-     * @param pwrIdleCsVal     (int) [IN] Power-up IDLE chip select value
-     * @param pwrActiveCsVal   (int) [IN] Power-up ACTIVE chip select value
-     * @param pwrCsToDataDly   (int) [IN] Power-up chip select to data delay
-     * @param pwrDataToDataDly (int) [IN] Power-up delay between subsequent data bytes
-     * @param pwrDataToCsDly   (int) [IN] Power-up last data byte to chip select
-     * @param pwrTxferSize     (int) [IN] Power-up bytes per SPI transaction
-     * @param pwrSpiMd         (byte) [IN] Power-up SPI mode (Possible values:0, 1, 2, or 3)
      * @return (int) Error code. Indicates if the operation was successful or not.
      * o = successful, other = failed
      */
 
-    public final int setPwrUpSpiTxferSettings(final int pwrBaudRate, final int pwrIdleCsVal,
-                                              final int pwrActiveCsVal, final int pwrCsToDataDly,
-                                              final int pwrDataToDataDly, final int pwrDataToCsDly,
-                                              final int pwrTxferSize, final byte pwrSpiMd) {
+    public final int setPwrUpSpiTxferSettings() {
 
         /* Setup a buffer with command */
 
@@ -464,42 +447,42 @@ public class MCP2210Driver {
         cmdData[2] = 0x00;
         cmdData[3] = 0x00;
         /* Set bit rate (32 bit value) */
-        cmdData[4] = (byte) ((pwrBaudRate << 24) >> 24);
-        cmdData[5] = (byte) ((pwrBaudRate << 16) >> 24);
-        cmdData[6] = (byte) ((pwrBaudRate << 8) >> 24);
-        cmdData[7] = (byte) (pwrBaudRate >> 24);
+        cmdData[4] = (byte) ((mBaudRate << 24) >> 24);
+        cmdData[5] = (byte) ((mBaudRate << 16) >> 24);
+        cmdData[6] = (byte) ((mBaudRate << 8) >> 24);
+        cmdData[7] = (byte) (mBaudRate >> 24);
         /* Set IDLE CS value (16 bit value) */
         // low byte
-        cmdData[8] = (byte) ((pwrIdleCsVal << 8) >> 8);
+        cmdData[8] = (byte) ((mIdleCsVal << 8) >> 8);
         // high byte
-        cmdData[9] = (byte) (pwrIdleCsVal >> 8);
+        cmdData[9] = (byte) (mIdleCsVal >> 8);
         /* Set ACTIVE CSvalue */
         // low byte
-        cmdData[10] = (byte) ((pwrActiveCsVal << 8) >> 8);
+        cmdData[10] = (byte) ((mActiveCsVal << 8) >> 8);
         // high byte
-        cmdData[11] = (byte) (pwrActiveCsVal >> 8);
+        cmdData[11] = (byte) (mActiveCsVal >> 8);
         /* Set CS to data delay */
         // low byte
-        cmdData[12] = (byte) ((pwrCsToDataDly << 8) >> 8);
+        cmdData[12] = (byte) ((mCsToDataDly << 8) >> 8);
         //high byte
-        cmdData[13] = (byte) (pwrCsToDataDly >> 8);
+        cmdData[13] = (byte) (mCsToDataDly >> 8);
         /* Set data to CS delay */
         // low byte
-        cmdData[14] = (byte) ((pwrDataToCsDly << 8) >> 8);
+        cmdData[14] = (byte) ((mDataToCsDly << 8) >> 8);
         // high byte
-        cmdData[15] = (byte) (pwrDataToCsDly >> 8);
+        cmdData[15] = (byte) (mDataToCsDly >> 8);
         /* Set data to data delay */
         // low byte
-        cmdData[16] = (byte) ((pwrDataToDataDly << 8) >> 8);
+        cmdData[16] = (byte) ((mDataToDataDly << 8) >> 8);
         // high byte
-        cmdData[17] = (byte) (pwrDataToDataDly >> 8);
+        cmdData[17] = (byte) (mDataToDataDly >> 8);
         /* Set SPI transfer size */
         // low byte
-        cmdData[18] = (byte) ((pwrTxferSize << 8) >> 8);
+        cmdData[18] = (byte) ((mTxferSize << 8) >> 8);
         // high byte
-        cmdData[19] = (byte) (pwrTxferSize >> 8);
+        cmdData[19] = (byte) (mTxferSize >> 8);
         /* Set SPI mode */
-        cmdData[20] = pwrSpiMd;
+        cmdData[20] = mSpiMd;
 
         /* Write the command to the device */
         boolean writeResult = false;
@@ -596,22 +579,10 @@ public class MCP2210Driver {
     /**
      * Set the current SPI parameters.
      *
-     * @param currentBaudRate      (int) [IN] Current SPI bit rate speed
-     * @param currentIdleCsVal     (int) [IN] Current IDLE chip select value
-     * @param currentActiveCsVal   (int) [IN] Current ACTIVE chip select value
-     * @param currentCsToDataDly   (int) [IN] Current chip select to data delay
-     * @param currentDataToDataDly (int) [IN] Current delay between subsequent data bytes
-     * @param currentDataToCsDly   (int) [IN] Current last data byte to chip select
-     * @param currentTxferSize     (int) [IN] Current bytes per SPI transaction
-     * @param currentSpiMd         (byte) [IN] Current SPI mode (Possible values:0, 1, 2, or 3)
      * @return (int) Error code. Indicates if the operation was successful or not.
      * 0 = successful, other = failed
      */
-    public final int setCurrentSpiTxferSettings(final int currentBaudRate, final int currentIdleCsVal,
-                                                final int currentActiveCsVal, final int currentCsToDataDly,
-                                                final int currentDataToDataDly, final int currentDataToCsDly,
-                                                final int currentTxferSize, final byte currentSpiMd) {
-
+    public final int setCurrentSpiTxferSettings() {
         /* Setup a buffer with command */
 
         cmdData[Mcp2210Constants.PKT_INDX_CMD] = Mcp2210Constants.CMD_SPI_TXFER_SETTINGS_SET;
@@ -620,42 +591,42 @@ public class MCP2210Driver {
         cmdData[2] = 0x00;
         cmdData[3] = 0x00;
         /* Set bit rate (32 bit value) */
-        cmdData[4] = (byte) ((currentBaudRate << 24) >> 24);
-        cmdData[5] = (byte) ((currentBaudRate << 16) >> 24);
-        cmdData[6] = (byte) ((currentBaudRate << 8) >> 24);
-        cmdData[7] = (byte) (currentBaudRate >> 24);
+        cmdData[4] = (byte) ((mBaudRate << 24) >> 24);
+        cmdData[5] = (byte) ((mBaudRate << 16) >> 24);
+        cmdData[6] = (byte) ((mBaudRate << 8) >> 24);
+        cmdData[7] = (byte) (mBaudRate >> 24);
         /* Set IDLE CS value (16 bit value) */
         // low byte
-        cmdData[8] = (byte) ((currentIdleCsVal << 8) >> 8);
+        cmdData[8] = (byte) ((mIdleCsVal << 8) >> 8);
         // high byte
-        cmdData[9] = (byte) (currentIdleCsVal >> 8);
+        cmdData[9] = (byte) (mIdleCsVal >> 8);
         /* Set ACTIVE CSvalue */
         // low byte
-        cmdData[10] = (byte) ((currentActiveCsVal << 8) >> 8);
+        cmdData[10] = (byte) ((mActiveCsVal << 8) >> 8);
         // high byte
-        cmdData[11] = (byte) (currentActiveCsVal >> 8);
+        cmdData[11] = (byte) (mActiveCsVal >> 8);
         /* Set CS to data delay */
         // low byte
-        cmdData[12] = (byte) ((currentCsToDataDly << 8) >> 8);
+        cmdData[12] = (byte) ((mCsToDataDly << 8) >> 8);
         // high byte
-        cmdData[13] = (byte) (currentCsToDataDly >> 8);
+        cmdData[13] = (byte) (mCsToDataDly >> 8);
         /* Set data to CS delay */
         // low byte
-        cmdData[14] = (byte) ((currentDataToCsDly << 8) >> 8);
+        cmdData[14] = (byte) ((mDataToCsDly << 8) >> 8);
         // high byte
-        cmdData[15] = (byte) (currentDataToCsDly >> 8);
+        cmdData[15] = (byte) (mDataToCsDly >> 8);
         /* Set data to data delay */
         // low byte
-        cmdData[16] = (byte) ((currentDataToDataDly << 8) >> 8);
+        cmdData[16] = (byte) ((mDataToDataDly << 8) >> 8);
         // high byte
-        cmdData[17] = (byte) (currentDataToDataDly >> 8);
+        cmdData[17] = (byte) (mDataToDataDly >> 8);
         /* Set SPI transfer size */
         // low byte
-        cmdData[18] = (byte) ((currentTxferSize << 8) >> 8);
+        cmdData[18] = (byte) ((mTxferSize << 8) >> 8);
         // high byte
-        cmdData[19] = (byte) (currentTxferSize >> 8);
+        cmdData[19] = (byte) (mTxferSize >> 8);
         /* Set SPI mode */
-        cmdData[20] = currentSpiMd;
+        cmdData[20] = mSpiMd;
 
         /* Write the command to the device */
         boolean writeResult = false;
@@ -1315,18 +1286,14 @@ public class MCP2210Driver {
                 spiDataTx.put((Mcp2210Constants.SPI_BRIDGE_MAX_DATA_PACKET * idx) + i, tx[i]);
             }
             result = makeSpiTxfer(tx, Mcp2210Constants.SPI_BRIDGE_MAX_DATA_PACKET, rx);
-            do {
-        /* Wait a moment and then get the status of the chip to check if device is ready to
-                 continue. If not, repeat */
-                try {
-                    TimeUnit.NANOSECONDS.sleep(1);
-                } catch (InterruptedException e) {
-                    e.printStackTrace();
-                }
+            while ((result != Mcp2210Constants.SPI_STATE_TXFER_DONE)
+                    && (result != Mcp2210Constants.SPI_STATE_TXFER_PENDING)) {
                 /* Send "dummy" packet to ping device for status */
                 result = makeSpiTxfer(tx, 0, rx);
-            } while ((result != Mcp2210Constants.SPI_STATE_TXFER_DONE)
-                    && (result != Mcp2210Constants.SPI_STATE_TXFER_PENDING));
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                    last2ndRequest.accept(System.currentTimeMillis());
+                }
+            }
             /*Copy received data */
             for (int i = 0; i < Mcp2210Constants.SPI_BRIDGE_MAX_DATA_PACKET; i++) {
                 spiDataRx.put((Mcp2210Constants.SPI_BRIDGE_MAX_DATA_PACKET * idx) + i, rx[i]);
@@ -1340,18 +1307,14 @@ public class MCP2210Driver {
                 tx[i] = spiDataTx.get((Mcp2210Constants.SPI_BRIDGE_MAX_DATA_PACKET * idx) + i);
             }
             result = makeSpiTxfer(tx, partialTxferSize, rx);
-            do {
-        /* Wait a moment and then get the status of the chip to check if device is ready to
-           continue. If not, repeat */
-                try {
-                    TimeUnit.NANOSECONDS.sleep(1);
-                } catch (InterruptedException e) {
-                    e.printStackTrace();
-                }
+            while ((result != Mcp2210Constants.SPI_STATE_TXFER_DONE)
+                    && (result != Mcp2210Constants.SPI_STATE_TXFER_PENDING)) {
                 /* Send "dummy" packet to ping device for status */
                 result = makeSpiTxfer(tx, 0, rx);
-            } while ((result != Mcp2210Constants.SPI_STATE_TXFER_DONE)
-                    && (result != Mcp2210Constants.SPI_STATE_TXFER_PENDING));
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                    last2ndRequest.accept(System.currentTimeMillis());
+                }
+            }
             /* Copy received data */
             for (int i = 0; i < Math.min(spiDataRx.limit(), partialTxferSize); i++) {
                 spiDataRx.put((Mcp2210Constants.SPI_BRIDGE_MAX_DATA_PACKET * idx) + i, rx[i]);

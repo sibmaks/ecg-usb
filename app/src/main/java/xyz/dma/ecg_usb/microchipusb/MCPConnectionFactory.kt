@@ -7,9 +7,10 @@ import android.hardware.usb.UsbInterface
 import android.hardware.usb.UsbManager
 import java.util.*
 
-class MCPConnectionFactory(private val mUsbManager: UsbManager,
-                           private val permissionIntent: PendingIntent,
-                           private val logger: (String) -> Unit
+class MCPConnectionFactory(
+    private val mUsbManager: UsbManager,
+    private val permissionIntent: PendingIntent,
+    private val logger: (String) -> Unit
 ) {
 
     fun openConnection(type: DeviceType) : MCPConnection? {

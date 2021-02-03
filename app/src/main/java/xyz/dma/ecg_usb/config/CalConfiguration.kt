@@ -1,6 +1,7 @@
 package xyz.dma.ecg_usb.config
 
 class CalConfiguration : BitConfig() {
+
     var thigh : Int
         get() = getBits(10, 11)
         set(value) { setBits(10, value, 11) }
@@ -28,4 +29,20 @@ class CalConfiguration : BitConfig() {
         set(value) { bits[22] = value }
 
     // reserved 9
+
+    fun read(data: UInt) {
+        var value = data
+        thigh = readBits(value, 11u).toInt()
+        value = value shr 11
+        fifty = readBit(value)
+        value = value shr 1
+        fcal = readBits(value, 3u).toInt()
+        value = value shr (3 + 5)
+
+        vmag = readBit(value)
+        value = value shr 1
+        vmode = readBit(value)
+        value = value shr 1
+        en_vcal = readBit(value)
+    }
 }

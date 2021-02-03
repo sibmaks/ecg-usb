@@ -18,6 +18,26 @@
             android:layout_marginTop="8dp"
             android:layout_marginBottom="8dp">
 
+        <ImageView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content" app:srcCompat="@drawable/baseline_sync_problem_24"
+                app:layout_constraintTop_toTopOf="parent" app:layout_constraintBottom_toBottomOf="parent"
+                android:id="@+id/secondReadIcon" android:layout_marginTop="8dp"
+                app:layout_constraintStart_toStartOf="parent"
+                android:layout_marginBottom="8dp" android:layout_marginStart="8dp"/>
+        <ImageView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content" app:srcCompat="@drawable/baseline_block_24"
+                app:layout_constraintTop_toTopOf="parent" app:layout_constraintBottom_toBottomOf="parent"
+                android:id="@+id/fifoResetIcon" app:layout_constraintStart_toEndOf="@+id/secondReadIcon"
+                android:layout_marginStart="16dp" android:layout_marginBottom="8dp" android:layout_marginTop="8dp"/>
+        <TextView
+                android:text="0"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content" app:layout_constraintTop_toTopOf="parent"
+                app:layout_constraintBottom_toBottomOf="parent" android:id="@+id/dotsPerRead"
+                app:layout_constraintStart_toEndOf="@+id/fifoResetIcon" android:layout_marginStart="16dp"
+                android:layout_marginTop="8dp" android:layout_marginBottom="8dp"/>
     </androidx.constraintlayout.widget.ConstraintLayout>
     <ScrollView
             android:layout_width="match_parent"
@@ -65,6 +85,14 @@
                         style="@style/Widget.AppCompat.Button.Small" app:layout_constraintVertical_bias="0.0"
                         app:layout_constraintStart_toEndOf="@+id/clearRecordButton" android:layout_marginStart="8dp"
                         android:onClick="onShareButtonClick"/>
+                <Button
+                        android:text="@string/sps_512"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content" android:id="@+id/button"
+                        app:layout_constraintStart_toEndOf="@+id/shareRecordButton" android:layout_marginStart="8dp"
+                        app:layout_constraintTop_toTopOf="parent" app:layout_constraintBottom_toBottomOf="parent"
+                        android:layout_marginTop="8dp" android:layout_marginBottom="8dp"
+                        android:onClick="onSpsChange"/>
             </androidx.constraintlayout.widget.ConstraintLayout>
             <TextView
                     android:layout_width="match_parent"

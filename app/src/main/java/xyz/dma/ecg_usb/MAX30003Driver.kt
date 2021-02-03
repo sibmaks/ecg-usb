@@ -6,12 +6,16 @@ import xyz.dma.ecg_usb.microchipusb.MCP2210Driver
 import xyz.dma.ecg_usb.microchipusb.Mcp2210Constants
 import java.nio.ByteBuffer
 import java.nio.IntBuffer
+import java.util.concurrent.locks.ReentrantLock
+import kotlin.concurrent.withLock
 
 
+@ExperimentalUnsignedTypes
 class MAX30003Driver(
     private val driver: MCP2210Driver,
     private val logger: (String) -> Unit
 ) {
+    private val accessLock = ReentrantLock()
     private val exchangeArray = ByteArray(64)
     private var exchangeBuffer = ByteBuffer.wrap(exchangeArray)
     private val dataArray = ByteArray(64)
@@ -47,8 +51,8 @@ class MAX30003Driver(
     private val defaultGpioOutput: IntBuffer = IntBuffer.allocate(1)
     private val defaultGpioDirection: IntBuffer = IntBuffer.allocate(1)
 
-    fun open() {
-        driver.setSpiTxferSize(ExchangeType.CURRENT_SETTINGS_ONLY,  4, 1000 * 1000 * 12)
+    fun open(spsMode: Int) {
+        driver.setSpiTxferSize(ExchangeType.CURRENT_SETTINGS_ONLY,  16 * 3 + 1, 1000 * 1000 * 12)
 
         turnOffBoard()
         swReset()
@@ -77,26 +81,27 @@ class MAX30003Driver(
         CNFG_GEN_r.enableDCLeadOffDetection = 1   // Enable DC lead-off detection
         writeRegister(CNFG_GEN, CNFG_GEN_r.toInt())
         logger("End configure CNFG_GEN: ${CNFG_GEN_r.toInt().toString(16)}")
-        var inMemory = readRegister(CNFG_GEN)
+        var inMemory = readRegisterTransactional(CNFG_GEN)
         CNFG_GEN_r.read(inMemory)
         logger("In memory CNFG_GEN: ${inMemory.toString(16)}")
-
-        //writeRegister(CNFG_CAL, 0x720000)  // 0x700000
 
         val CNFG_CAL_r = CalConfiguration()
         CNFG_CAL_r.en_vcal = true
         writeRegister(CNFG_CAL, CNFG_CAL_r.toInt())
         logger("End configure CNFG_CAL: ${CNFG_CAL_r.toInt().toString(16)}")
+        inMemory = readRegisterTransactional(CNFG_CAL)
+        CNFG_CAL_r.read(inMemory)
+        logger("In memory CNFG_CAL: ${inMemory.toString(16)}")
 
         // ECG Config register setting
         val CNFG_ECG_r = ECGConfiguration()
         CNFG_ECG_r.digitalLowPassFilter = 0 // Digital LPF cutoff = 40Hz
-        CNFG_ECG_r.digitalHighPassFilter = true // Digital HPF cutoff = 0.5Hz
+        CNFG_ECG_r.digitalHighPassFilter = false // Digital HPF cutoff = 0.5Hz
         CNFG_ECG_r.gain = 1 // ECG gain = 40V/V
-        CNFG_ECG_r.rate = 0 // Sample rate = 128 sps
+        CNFG_ECG_r.rate = spsToRate(spsMode) // Sample rate = 128 sps
         writeRegister(CNFG_ECG, CNFG_ECG_r.toInt())
         logger("End configure CNFG_ECG: ${CNFG_ECG_r.toInt().toString(16)}")
-        inMemory = readRegister(CNFG_ECG)
+        inMemory = readRegisterTransactional(CNFG_ECG)
         CNFG_ECG_r.read(inMemory)
         logger("In memory CNFG_ECG: ${inMemory.toString(16)}")
 
@@ -124,65 +129,72 @@ class MAX30003Driver(
         writeRegister(CNFG_EMUX, CNFG_MUX_r.toInt())
         logger("End configure CNFG_EMUX: ${CNFG_MUX_r.toInt().toString(16)}")
 
-        //Enable interrupts register setting
-        /*val EN_INT_r = EnableInterrupts()
-        EN_INT_r.en_eint = true // Enable EINT interrupt
-        EN_INT_r.en_rrint = true // Enable R-to-R interrupt
-        EN_INT_r.intb_type = 3 // Open-drain NMOS with internal pullup
-        writeRegister(EN_INT, EN_INT_r.toInt())
-        logger("End configure EN_INT: ${EN_INT_r.toInt().toString(16)}")*/
-
-        //Dyanmic modes config
-        /*val MNG_DYN_r = ManageDynamicModes()
-        MNG_DYN_r.fast = 0 // Fast recovery mode disabled
-        writeRegister(MNGR_DYN, MNG_DYN_r.toInt())
-        logger("End configure MNGR_DYN: ${MNG_DYN_r.toInt().toString(16)}")*/
-
-
-        //sendSynch()
-
         logger("End configure")
 
-        //turnOnBoard()
-        /*
-        writeRegister(CNFG_GEN, 0x081007)
-        MILLISECONDS.sleep(100)
-        writeRegister(CNFG_CAL, 0x720000)  // 0x700000
-        MILLISECONDS.sleep(100)
-        writeRegister(CNFG_EMUX, 0x0B0000)
-        MILLISECONDS.sleep(100)
-        writeRegister(CNFG_ECG, 0x805000)  // d23 - d22 : 10 for 250sps , 00:500 sps
-        MILLISECONDS.sleep(100)
-
-        writeRegister(CNFG_RTOR1, 0x3fc600)
-        MILLISECONDS.sleep(100)*/
         sendSynch()
     }
 
-    fun readRegister(address: Int): UInt {
-        val spiTXBuffer = (address shl 1) or READ_REGISTER
-        exchangeArray[0] = spiTXBuffer.toByte()
+    fun readRegisterTransactional(address: Int): UInt {
+        accessLock.withLock {
+            val spiTXBuffer = (address shl 1) or READ_REGISTER
+            exchangeArray[0] = spiTXBuffer.toByte()
 
-        //turnOnBoard()
-        //logger("3 ${System.currentTimeMillis() - now}")
-        //val responseCode = driver.txferSpiDataBuf(exchangeBuffer, dataBuffer)
-        val responseCode = driver.makeSpiTxfer(exchangeArray, 4, dataArray)
-        //logger("4 ${System.currentTimeMillis() - now}")
-        //turnOffBoard()
+            //turnOnBoard()
+            //logger("3 ${System.currentTimeMillis() - now}")
+            val responseCode = driver.txferSpiDataBuf(exchangeBuffer, dataBuffer)
+            //logger("4 ${System.currentTimeMillis() - now}")
+            //turnOffBoard()
 
-        /*if(responseCode != Mcp2210Constants.SUCCESSFUL) {
-            throw RuntimeException("Read data exception: $responseCode")
-        }*/
-        //logger("Incoming data: ${dataBuffer[0]} ${dataBuffer[1]} ${dataBuffer[2]} ${dataBuffer[3]}")
+            if (responseCode != Mcp2210Constants.SUCCESSFUL) {
+                throw RuntimeException("Read data exception: $responseCode")
+            }
+            //logger("Incoming data: ${dataBuffer[0]} ${dataBuffer[1]} ${dataBuffer[2]} ${dataBuffer[3]}")
 
-        var data = dataArray[1] + 0u
-        data = data shl 8
-        data = data or (dataArray[2] + 0u)
-        data = data shl 8
-        data = data or (dataArray[3] + 0u)
+            var data = dataArray[1] + 0u
+            data = data shl 8
+            data = data or (dataArray[2] + 0u)
+            data = data shl 8
+            data = data or (dataArray[3] + 0u)
 
-        //logger("6 ${System.currentTimeMillis() - now}")
-        return data
+            //logger("6 ${System.currentTimeMillis() - now}")
+            return data
+        }
+    }
+
+    fun readsRegisterTransactional(address: Int): List<UInt> {
+        accessLock.withLock {
+            val spiTXBuffer = (address shl 1) or READ_REGISTER
+            val command = spiTXBuffer.toByte()
+            for(i in 0..(16 * 3)) {
+                exchangeArray[i] = command
+            }
+
+            //turnOnBoard()
+            //logger("3 ${System.currentTimeMillis() - now}")
+            val responseCode = driver.txferSpiDataBuf(exchangeBuffer, dataBuffer)
+            //logger("4 ${System.currentTimeMillis() - now}")
+            //turnOffBoard()
+
+            if (responseCode != Mcp2210Constants.SUCCESSFUL) {
+                throw RuntimeException("Read data exception: $responseCode")
+            }
+            //logger("Incoming data: ${dataBuffer[0]} ${dataBuffer[1]} ${dataBuffer[2]} ${dataBuffer[3]}")
+
+            val datas = ArrayList<UInt>()
+
+            for(i in 0..16) {
+                var data = dataArray[i * 3 + 1] + 0u
+                data = data shl 8
+                data = data or (dataArray[i * 3 + 2] + 0u)
+                data = data shl 8
+                data = data or (dataArray[i * 3 + 3] + 0u)
+
+                datas.add(data)
+            }
+
+            //logger("6 ${System.currentTimeMillis() - now}")
+            return datas
+        }
     }
 
     private fun swReset() {
@@ -193,30 +205,21 @@ class MAX30003Driver(
         writeRegister(FIFO_RST, 0x000000)
     }
 
-    fun writeRegister(address: Int, data: Int) {
+    private fun writeRegister(address: Int, data: Int) {
         // now combine the register address and the command into one byte:
         val dataToSend = (address shl 1) or WRITE_REGISTER
 
-        exchangeArray[0] = dataToSend.toByte()
-        exchangeArray[1] = (data ushr 16).toByte()
-        exchangeArray[2] = (data ushr 8).toByte()
-        exchangeArray[3] = data.toByte()
+        accessLock.withLock {
+            exchangeArray[0] = dataToSend.toByte()
+            exchangeArray[1] = (data ushr 16).toByte()
+            exchangeArray[2] = (data ushr 8).toByte()
+            exchangeArray[3] = data.toByte()
 
-        turnOnBoard()
-        driver.txferSpiDataBuf(exchangeBuffer, dataBuffer)
-        turnOffBoard()
+            driver.txferSpiDataBuf(exchangeBuffer, dataBuffer)
+        }
     }
 
-    fun turnOnBoard() {
-        // Made output mode
-        val defaultGpioDirectionVal = defaultGpioDirection[0] and 0xFE
-        // Turn on chip
-        val defaultGpioOutputVal = defaultGpioOutput[0] and 0xFE
-
-        driver.setGpConfig(ExchangeType.CURRENT_SETTINGS_ONLY, gpPinDes, defaultGpioOutputVal, defaultGpioDirectionVal)
-    }
-
-    fun turnOffBoard() {
+    private fun turnOffBoard() {
         // Made output mode
         val defaultGpioDirectionVal = defaultGpioDirection[0] and 0xFE
         // Turn on chip
@@ -240,6 +243,38 @@ class MAX30003Driver(
 
     fun sendSynch() {
         writeRegister(SYNCH, 0x000000)
+    }
+
+    fun changeSps(spsMode: Int) {
+        // ECG Config register setting
+        val CNFG_ECG_r = ECGConfiguration()
+        CNFG_ECG_r.digitalLowPassFilter = 0 // Digital LPF cutoff = 40Hz
+        CNFG_ECG_r.digitalHighPassFilter = true // Digital HPF cutoff = 0.5Hz
+        CNFG_ECG_r.gain = 1 // ECG gain = 40V/V
+        CNFG_ECG_r.rate = spsToRate(spsMode) // Sample rate = 128 sps
+
+        accessLock.withLock {
+
+            writeRegister(CNFG_ECG, CNFG_ECG_r.toInt())
+            logger("Configure CNFG_ECG changed: ${CNFG_ECG_r.toInt().toString(16)}")
+            val inMemory = readRegisterTransactional(CNFG_ECG)
+            CNFG_ECG_r.read(inMemory)
+            logger("In memory CNFG_ECG: ${inMemory.toString(16)}")
+
+            sendSynch()
+        }
+    }
+
+    private fun spsToRate(spsMode: Int): Int {
+        return when(spsMode) {
+            512 -> {
+                0
+            }
+            256 -> {
+                1
+            }
+            else -> 2
+        }
     }
 }
 

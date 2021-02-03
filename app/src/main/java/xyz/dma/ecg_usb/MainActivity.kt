@@ -9,13 +9,14 @@ import android.hardware.usb.UsbManager
 import android.os.Bundle
 import android.view.View
 import android.widget.Button
+import android.widget.ImageView
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.FileProvider
 import com.jjoe64.graphview.GraphView
 import com.jjoe64.graphview.series.DataPoint
 import com.jjoe64.graphview.series.LineGraphSeries
-import xyz.dma.ecg_usb.MAX30003Driver.Companion.ECG_FIFO
+import xyz.dma.ecg_usb.MAX30003Driver.Companion.ECG_FIFO_BURST
 import xyz.dma.ecg_usb.microchipusb.DeviceType
 import xyz.dma.ecg_usb.microchipusb.MCP2210Driver
 import xyz.dma.ecg_usb.microchipusb.MCPConnection
@@ -23,6 +24,7 @@ import xyz.dma.ecg_usb.microchipusb.MCPConnectionFactory
 import java.io.File
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.TimeUnit
 import kotlin.math.max
 
 
@@ -39,6 +41,11 @@ class MainActivity : AppCompatActivity() {
     private var etagResponse7 = 0
     @Volatile
     private var otherError = 0
+    private var spsMode = 512
+    private var maxDriver: MAX30003Driver? = null
+    private var lastSecondRequestTime: Long = 0
+    private var lastFifoResetTime: Long = 0
+    private var pointsPerRead: Int = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -106,11 +113,40 @@ class MainActivity : AppCompatActivity() {
                 }
                 if(recordOn) {
                     recordedPoints.add(point)
+                    addPoint(count++, point)
                 }
-                addPoint(count++, point)
             }
         }.start()
 
+        Thread {
+            while(!Thread.interrupted()) {
+                changeVisibility(findViewById(R.id.secondReadIcon), lastSecondRequestTime, 3000)
+                changeVisibility(findViewById(R.id.fifoResetIcon), lastFifoResetTime, 3000)
+
+                val pointsPerReadView = findViewById<TextView>(R.id.dotsPerRead)
+                runOnUiThread {
+                    pointsPerReadView.text = pointsPerRead.toString()
+                }
+
+                TimeUnit.MILLISECONDS.sleep(100)
+            }
+        }.start()
+    }
+
+    private fun changeVisibility(icon: ImageView, lastTime: Long, delay: Long) {
+        if(System.currentTimeMillis() - lastTime  < delay) {
+            if(icon.visibility != View.VISIBLE) {
+                runOnUiThread {
+                    icon.visibility = View.VISIBLE
+                }
+            }
+        } else {
+            if (icon.visibility != View.INVISIBLE) {
+                runOnUiThread {
+                    icon.visibility = View.INVISIBLE
+                }
+            }
+        }
     }
 
     private fun connectEcg(usbManager: UsbManager, permissionIntent: PendingIntent) {
@@ -132,9 +168,10 @@ class MainActivity : AppCompatActivity() {
                     return
                 }
             }
-            val driver = MCP2210Driver(mcpConnection) { log(it) }
+            val driver = MCP2210Driver(mcpConnection, { log(it) }) {lastSecondRequestTime = it}
             val maxDriver = MAX30003Driver(driver) { a -> log(a) }
-            maxDriver.open()
+            maxDriver.open(spsMode)
+            this.maxDriver = maxDriver
 
             workingThread = Thread {
                 max30003Read(maxDriver)
@@ -150,18 +187,27 @@ class MainActivity : AppCompatActivity() {
     private fun max30003Read(maxDriver: MAX30003Driver) {
         try {
             while (!Thread.interrupted()) {
-                val egcData = maxDriver.readRegister(ECG_FIFO)
-                val etag = (egcData shr 3) and 0x7u
-                if (etag != 0u && etag != 1u && etag != 2u) {
-                    if (etag == 0x7u) {//FIFO_OVF
-                        etagResponse7++
-                        maxDriver.fifoReset()
+                val ecgDatas = maxDriver.readsRegisterTransactional(ECG_FIFO_BURST)
+                var pointsPerRead = 0
+                for(ecgData in ecgDatas) {
+                    //val egcData = maxDriver.readRegisterTransactional(ECG_FIFO)
+                    val etag = (ecgData shr 3) and 0x7u
+                    if (etag != 0u && etag != 1u && etag != 2u) {
+                        if (etag == 0x7u) {//FIFO_OVF
+                            etagResponse7++
+                            maxDriver.fifoReset()
+                            lastFifoResetTime = System.currentTimeMillis()
+                            break
+                        } else {
+                            otherError++
+                            break
+                        }
                     } else {
-                        otherError++
+                        ecgPoints.add(ecgData)
+                        pointsPerRead++
                     }
-                } else {
-                    ecgPoints.add(egcData)
                 }
+                this.pointsPerRead = pointsPerRead
             }
         } catch (e: Exception) {
             log(e.message ?: "null message")
@@ -219,6 +265,28 @@ class MainActivity : AppCompatActivity() {
 
             startActivity(Intent.createChooser(intentShareFile, "Сохранить результаты"))
         }.start()
+    }
+
+    fun onSpsChange(view: View) {
+        if(view !is Button) {
+            return
+        }
+
+        when (spsMode) {
+            512 -> {
+                spsMode = 128
+                view.text = resources.getString(R.string.sps_128)
+            }
+            256 -> {
+                spsMode = 512
+                view.text = resources.getString(R.string.sps_512)
+            }
+            else -> {
+                spsMode = 256
+                view.text = resources.getString(R.string.sps_256)
+            }
+        }
+        maxDriver?.changeSps(spsMode)
     }
 }
 

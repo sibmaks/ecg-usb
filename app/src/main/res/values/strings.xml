@@ -3,4 +3,5 @@
     <string name="sps_512">SPS: 512</string>
     <string name="sps_256">SPS: 256</string>
     <string name="sps_128">SPS: 128</string>
+    <string name="send_button">Send</string>
 </resources>

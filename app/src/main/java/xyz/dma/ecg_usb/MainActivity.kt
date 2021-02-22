@@ -9,43 +9,30 @@ import android.hardware.usb.UsbManager
 import android.os.Bundle
 import android.view.View
 import android.widget.Button
-import android.widget.ImageView
+import android.widget.EditText
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.FileProvider
 import com.jjoe64.graphview.GraphView
 import com.jjoe64.graphview.series.DataPoint
 import com.jjoe64.graphview.series.LineGraphSeries
-import xyz.dma.ecg_usb.MAX30003Driver.Companion.ECG_FIFO_BURST
-import xyz.dma.ecg_usb.microchipusb.DeviceType
-import xyz.dma.ecg_usb.microchipusb.MCP2210Driver
-import xyz.dma.ecg_usb.microchipusb.MCPConnection
-import xyz.dma.ecg_usb.microchipusb.MCPConnectionFactory
+import xyz.dma.ecg_usb.serial.SerialListener
+import xyz.dma.ecg_usb.serial.SerialSocket
 import java.io.File
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.LinkedBlockingQueue
-import java.util.concurrent.TimeUnit
 import kotlin.math.max
 
 
 @ExperimentalUnsignedTypes
-class MainActivity : AppCompatActivity() {
+class MainActivity : AppCompatActivity(), SerialListener {
     private val ACTION_USB_PERMISSION = "xyz.dma.ecg_usb.USB_PERMISSION"
     private lateinit var series: LineGraphSeries<DataPoint>
-    private var workingThread: Thread? = null
-    private var mcpConnection: MCPConnection? = null
-    private val ecgPoints = LinkedBlockingQueue<UInt>()
-    private val recordedPoints = CopyOnWriteArrayList<Double>()
+    private val ecgPoints = LinkedBlockingQueue<Int>()
+    private val recordedPoints = CopyOnWriteArrayList<Int>()
     private var recordOn: Boolean = false
-    @Volatile
-    private var etagResponse7 = 0
-    @Volatile
-    private var otherError = 0
-    private var spsMode = 512
-    private var maxDriver: MAX30003Driver? = null
-    private var lastSecondRequestTime: Long = 0
-    private var lastFifoResetTime: Long = 0
-    private var pointsPerRead: Int = 0
+    private var pointPrinting: Boolean = false
+    private lateinit var serialSocket: SerialSocket
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -66,7 +53,9 @@ class MainActivity : AppCompatActivity() {
                 Intent(ACTION_USB_PERMISSION), 0
             )
 
-            val usbManager = this.getSystemService(Context.USB_SERVICE) as UsbManager
+            serialSocket = SerialSocket(getSystemService(Context.USB_SERVICE) as UsbManager, permissionIntent) { log(it, false)}
+            serialSocket.addListener(this)
+
             val filter = IntentFilter(ACTION_USB_PERMISSION)
 
             filter.addAction(UsbManager.ACTION_USB_DEVICE_DETACHED)
@@ -76,24 +65,34 @@ class MainActivity : AppCompatActivity() {
                 override fun onReceive(context: Context?, intent: Intent?) {
                     when (intent?.action) {
                         ACTION_USB_PERMISSION -> {
-                            connectEcg(usbManager, permissionIntent)
+                            serialSocket.connect()
+                            if(serialSocket.isConnected()) {
+                                findViewById<Button>(R.id.startRecordButton).isEnabled = true
+                                findViewById<Button>(R.id.sendButton).isEnabled = true
+                            }
                         }
                         UsbManager.ACTION_USB_DEVICE_DETACHED -> {
-                            mcpConnection?.close()
-                            mcpConnection = null
-                            val wThread = workingThread
-                            if (wThread != null && !wThread.isInterrupted) {
-                                workingThread?.interrupt()
+                            try {
+                                serialSocket.close()
+                                switchStartButton(false)
+                            } catch (e: Exception) {
+                                log(e.message ?: "null message exception")
+                                log(e.stackTraceToString())
+                            } finally {
+                                findViewById<Button>(R.id.startRecordButton).isEnabled = false
+                                findViewById<Button>(R.id.sendButton).isEnabled = false
                             }
                         }
                         UsbManager.ACTION_USB_DEVICE_ATTACHED -> {
-                            connectEcg(usbManager, permissionIntent)
+                            serialSocket.connect()
+                            if(serialSocket.isConnected()) {
+                                findViewById<Button>(R.id.startRecordButton).isEnabled = true
+                                findViewById<Button>(R.id.sendButton).isEnabled = true
+                            }
                         }
                     }
                 }
             }, filter)
-
-            connectEcg(usbManager, permissionIntent)
         } catch (e: Exception) {
             log(e.message ?: "null message exception")
             log(e.stackTraceToString())
@@ -101,131 +100,30 @@ class MainActivity : AppCompatActivity() {
 
         Thread {
             var count = 0L
-            var wasPoint: Double? = null
             while (!Thread.interrupted()) {
                 val egcData = ecgPoints.take()
-                val point = ((((egcData shr 8).toShort()).toInt() shl 2) or (egcData and 0b11u).toInt()).toDouble()
-                if(wasPoint == null || wasPoint != point) {
-                    wasPoint = point
-                } else if(wasPoint == point) {
-                    wasPoint = null
-                    continue
-                }
                 if(recordOn) {
-                    recordedPoints.add(point)
-                    addPoint(count++, point)
+                    recordedPoints.add(egcData)
+                    addPoint(count++, egcData)
                 }
             }
         }.start()
-
-        Thread {
-            while(!Thread.interrupted()) {
-                changeVisibility(findViewById(R.id.secondReadIcon), lastSecondRequestTime, 3000)
-                changeVisibility(findViewById(R.id.fifoResetIcon), lastFifoResetTime, 3000)
-
-                val pointsPerReadView = findViewById<TextView>(R.id.dotsPerRead)
-                runOnUiThread {
-                    pointsPerReadView.text = pointsPerRead.toString()
-                }
-
-                TimeUnit.MILLISECONDS.sleep(100)
-            }
-        }.start()
     }
 
-    private fun changeVisibility(icon: ImageView, lastTime: Long, delay: Long) {
-        if(System.currentTimeMillis() - lastTime  < delay) {
-            if(icon.visibility != View.VISIBLE) {
-                runOnUiThread {
-                    icon.visibility = View.VISIBLE
-                }
-            }
-        } else {
-            if (icon.visibility != View.INVISIBLE) {
-                runOnUiThread {
-                    icon.visibility = View.INVISIBLE
-                }
-            }
-        }
-    }
-
-    private fun connectEcg(usbManager: UsbManager, permissionIntent: PendingIntent) {
-        val factory = MCPConnectionFactory(usbManager, permissionIntent) { log(it) }
-
-        try {
-            try {
-                mcpConnection = factory.openConnection(DeviceType.MCP2210)
-                if (mcpConnection == null) {
-                    log("Connection exception")
-                    return
-                }
-            } catch (e: java.lang.Exception) {
-                log(e.message.toString())
-                log(e.stackTraceToString())
-                mcpConnection = factory.openConnection(DeviceType.MCP2210)
-                if (mcpConnection == null) {
-                    log("Connection exception")
-                    return
-                }
-            }
-            val driver = MCP2210Driver(mcpConnection, { log(it) }) {lastSecondRequestTime = it}
-            val maxDriver = MAX30003Driver(driver) { a -> log(a) }
-            maxDriver.open(spsMode)
-            this.maxDriver = maxDriver
-
-            workingThread = Thread {
-                max30003Read(maxDriver)
-            }
-            log("Start working thread")
-            workingThread?.start()
-        } catch (e: Exception) {
-            log(e.message ?: "null")
-            log(e.stackTraceToString())
-        }
-    }
-
-    private fun max30003Read(maxDriver: MAX30003Driver) {
-        try {
-            while (!Thread.interrupted()) {
-                val ecgDatas = maxDriver.readsRegisterTransactional(ECG_FIFO_BURST)
-                var pointsPerRead = 0
-                for(ecgData in ecgDatas) {
-                    //val egcData = maxDriver.readRegisterTransactional(ECG_FIFO)
-                    val etag = (ecgData shr 3) and 0x7u
-                    if (etag != 0u && etag != 1u && etag != 2u) {
-                        if (etag == 0x7u) {//FIFO_OVF
-                            etagResponse7++
-                            maxDriver.fifoReset()
-                            lastFifoResetTime = System.currentTimeMillis()
-                            break
-                        } else {
-                            otherError++
-                            break
-                        }
-                    } else {
-                        ecgPoints.add(ecgData)
-                        pointsPerRead++
-                    }
-                }
-                this.pointsPerRead = pointsPerRead
-            }
-        } catch (e: Exception) {
-            log(e.message ?: "null message")
-            log(e.stackTraceToString())
-        }
-    }
-
-    private fun log(text: String) {
+    private fun log(text: String, newLine: Boolean = true) {
         val textView = findViewById<TextView>(R.id.textView) ?: return
         runOnUiThread {
-            textView.text = textView.text + "\n" + text
+            textView.text = textView.text + text
+            if(newLine) {
+                textView.text = textView.text + "\n"
+            }
         }
     }
 
-    private fun addPoint(time: Long, value: Double) {
+    private fun addPoint(time: Long, value: Int) {
         val graph = findViewById<View>(R.id.ecgGraph) as GraphView
         runOnUiThread {
-            series.appendData(DataPoint(time.toDouble(), value), true, 2000)
+            series.appendData(DataPoint(time.toDouble(), value.toDouble()), true, 2000)
             graph.viewport.setMinX(max(0, time - 128 * 5).toDouble())
             graph.viewport.setMaxX(max(128 * 5, time).toDouble())
         }
@@ -234,16 +132,41 @@ class MainActivity : AppCompatActivity() {
     fun onStartButtonClick(view: View) {
         recordOn = !recordOn
         if(view is Button) {
-            if (recordOn) {
-                view.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_stop, 0, 0, 0)
-            } else {
-                view.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_play_arrow, 0, 0, 0)
+            switchStartButton(recordOn, view)
+        }
+    }
+
+    private fun switchStartButton(start: Boolean, view: Button = findViewById(R.id.startRecordButton)) {
+        if(start) {
+            view.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_stop, 0, 0, 0)
+            pointPrinting = true
+            serialSocket.send("3")
+        } else {
+            view.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_play_arrow, 0, 0, 0)
+            pointPrinting = false
+            if(serialSocket.isConnected()) {
+                serialSocket.send("4")
             }
         }
+        serialSocket.reset()
     }
 
     fun onResetButtonClick(view: View) {
         recordedPoints.clear()
+    }
+
+    fun onSendButtonClick(view: View) {
+        try {
+            val commandView = findViewById<EditText>(R.id.commandLinePlainText)
+            val text = commandView.text.trim().toString()
+            if (text.isNotBlank()) {
+                serialSocket.send(text)
+                commandView.setText("")
+            }
+        } catch (e: Exception) {
+            log(e.message ?: "null message exception")
+            log(e.stackTraceToString())
+        }
     }
 
     fun onShareButtonClick(view: View) {
@@ -267,29 +190,13 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
-    fun onSpsChange(view: View) {
-        if(view !is Button) {
-            return
-        }
-
-        when (spsMode) {
-            512 -> {
-                spsMode = 128
-                view.text = resources.getString(R.string.sps_128)
-            }
-            256 -> {
-                spsMode = 512
-                view.text = resources.getString(R.string.sps_512)
-            }
-            else -> {
-                spsMode = 256
-                view.text = resources.getString(R.string.sps_256)
+    override fun onLine(line: String) {
+        if (line.isNotEmpty()) {
+            if(pointPrinting && line.isInt()) {
+                ecgPoints.add(line.toInt())
+            } else {
+                log(line)
             }
         }
-        maxDriver?.changeSps(spsMode)
     }
-}
-
-private operator fun CharSequence.plus(string: String): CharSequence {
-    return this.toString() + string
 }

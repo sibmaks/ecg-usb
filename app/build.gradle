@@ -29,6 +29,7 @@ android {
 }
 
 dependencies {
+    implementation 'com.github.mik3y:usb-serial-for-android:3.3.0'
     implementation 'com.jjoe64:graphview:4.2.2'
     implementation fileTree(dir: "libs", include: ["*.jar"])
     //noinspection GradleDependency

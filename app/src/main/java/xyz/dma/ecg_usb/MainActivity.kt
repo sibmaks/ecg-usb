@@ -143,10 +143,10 @@ class MainActivity : AppCompatActivity(), SerialListener {
             serialSocket.send("3")
         } else {
             view.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_play_arrow, 0, 0, 0)
-            pointPrinting = false
             if(serialSocket.isConnected()) {
                 serialSocket.send("4")
             }
+            pointPrinting = false
         }
         serialSocket.reset()
     }

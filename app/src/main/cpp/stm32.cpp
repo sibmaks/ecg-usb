@@ -151,7 +151,6 @@ void loop() {
         code |= (hex2int(readChar())) << ((7 - i) * 4);
       }
 
-      max30003->swReset();
       max30003->fifoReset();
       max30003->writeRegister(reg , code);
       max30003->synch();

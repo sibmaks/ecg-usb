@@ -11,6 +11,7 @@ import android.view.View
 import android.widget.Button
 import android.widget.EditText
 import android.widget.TextView
+import android.widget.ToggleButton
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.FileProvider
 import com.jjoe64.graphview.GraphView
@@ -20,6 +21,8 @@ import xyz.dma.ecg_usb.serial.SerialListener
 import xyz.dma.ecg_usb.serial.SerialSocket
 import java.io.File
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 import java.util.concurrent.LinkedBlockingQueue
 import kotlin.math.max
 
@@ -32,6 +35,7 @@ class MainActivity : AppCompatActivity(), SerialListener {
     private val recordedPoints = CopyOnWriteArrayList<Int>()
     private var recordOn: Boolean = false
     private var pointPrinting: Boolean = false
+    private val executionService: ExecutorService = Executors.newFixedThreadPool(8)
     private lateinit var serialSocket: SerialSocket
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -98,7 +102,7 @@ class MainActivity : AppCompatActivity(), SerialListener {
             log(e.stackTraceToString())
         }
 
-        Thread {
+        executionService.submit {
             var count = 0L
             while (!Thread.interrupted()) {
                 val egcData = ecgPoints.take()
@@ -107,7 +111,7 @@ class MainActivity : AppCompatActivity(), SerialListener {
                     addPoint(count++, egcData)
                 }
             }
-        }.start()
+        }
     }
 
     private fun log(text: String, newLine: Boolean = true) {
@@ -136,6 +140,12 @@ class MainActivity : AppCompatActivity(), SerialListener {
         }
     }
 
+    fun onRecordButtonClick(view: View) {
+        if(view is ToggleButton) {
+            pointPrinting = view.isActivated
+        }
+    }
+
     private fun switchStartButton(start: Boolean, view: Button = findViewById(R.id.startRecordButton)) {
         if(start) {
             view.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_stop, 0, 0, 0)
@@ -147,12 +157,16 @@ class MainActivity : AppCompatActivity(), SerialListener {
                 serialSocket.send("4")
             }
             pointPrinting = false
+            findViewById<ToggleButton>(R.id.recordToggleButton).isActivated = false
         }
+        findViewById<ToggleButton>(R.id.recordToggleButton).isEnabled = pointPrinting
         serialSocket.reset()
     }
 
     fun onResetButtonClick(view: View) {
-        recordedPoints.clear()
+        executionService.submit {
+            recordedPoints.clear()
+        }
     }
 
     fun onSendButtonClick(view: View) {
@@ -170,7 +184,7 @@ class MainActivity : AppCompatActivity(), SerialListener {
     }
 
     fun onShareButtonClick(view: View) {
-        Thread {
+        executionService.submit{
             val recordsPath = File(this@MainActivity.filesDir, "records")
             if(!recordsPath.exists()) {
                 recordsPath.mkdirs()
@@ -187,7 +201,7 @@ class MainActivity : AppCompatActivity(), SerialListener {
             intentShareFile.putExtra(Intent.EXTRA_TEXT, "Share file...")
 
             startActivity(Intent.createChooser(intentShareFile, "Сохранить результаты"))
-        }.start()
+        }
     }
 
     override fun onLine(line: String) {

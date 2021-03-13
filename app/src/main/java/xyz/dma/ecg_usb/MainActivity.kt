@@ -210,14 +210,18 @@ class MainActivity : AppCompatActivity(), SerialDataListener, SerialSocketListen
     }
 
     override fun onConnect(serialSocket: SerialSocket) {
-        findViewById<Button>(R.id.startRecordButton).isEnabled = true
-        findViewById<Button>(R.id.sendButton).isEnabled = true
+        runOnUiThread {
+            findViewById<Button>(R.id.startRecordButton).isEnabled = true
+            findViewById<Button>(R.id.sendButton).isEnabled = true
+        }
         serialSocket.send("0")
     }
 
     override fun onDisconnect(serialSocket: SerialSocket) {
-        findViewById<Button>(R.id.startRecordButton).isEnabled = false
-        findViewById<Button>(R.id.sendButton).isEnabled = false
-        findViewById<ToggleButton>(R.id.recordToggleButton).isEnabled = false
+        runOnUiThread {
+            findViewById<Button>(R.id.startRecordButton).isEnabled = false
+            findViewById<Button>(R.id.sendButton).isEnabled = false
+            findViewById<ToggleButton>(R.id.recordToggleButton).isEnabled = false
+        }
     }
 }

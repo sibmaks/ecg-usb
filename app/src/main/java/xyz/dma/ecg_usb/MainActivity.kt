@@ -25,6 +25,7 @@ import xyz.dma.ecg_usb.util.plus
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.TimeUnit
 import kotlin.math.max
 
 
@@ -49,6 +50,9 @@ class MainActivity : AppCompatActivity(), SerialDataListener, SerialSocketListen
         graph.viewport.isScalable = true
         graph.viewport.setScalableY(true)
         graph.gridLabelRenderer.labelVerticalWidth = 180
+        graph.gridLabelRenderer.numHorizontalLabels = 15
+        graph.gridLabelRenderer.numVerticalLabels = 15
+        graph.gridLabelRenderer.isHorizontalLabelsVisible = false
 
         /** UsbManager used to scan for connected MCP2210 devices and grant USB permission.  */
         try {
@@ -61,7 +65,7 @@ class MainActivity : AppCompatActivity(), SerialDataListener, SerialSocketListen
             serialSocket.addDataListener(this)
             serialSocket.addSocketListener(this)
 
-            pointRecorder = PointRecorder(this)
+            pointRecorder = PointRecorder(this) {log(it)}
 
             val filter = IntentFilter(ACTION_USB_PERMISSION)
 
@@ -135,7 +139,7 @@ class MainActivity : AppCompatActivity(), SerialDataListener, SerialSocketListen
 
     fun onRecordButtonClick(view: View) {
         if(view is ToggleButton) {
-            recordOn = view.isActivated
+            recordOn = view.isChecked
         }
     }
 
@@ -149,7 +153,10 @@ class MainActivity : AppCompatActivity(), SerialDataListener, SerialSocketListen
             if(serialSocket.isConnected()) {
                 serialSocket.send("4")
             }
-            pointPrinting = false
+            executionService.submit {
+                TimeUnit.SECONDS.sleep(5)
+                pointPrinting = false
+            }
             findViewById<ToggleButton>(R.id.recordToggleButton).isActivated = false
         }
         findViewById<ToggleButton>(R.id.recordToggleButton).isEnabled = pointPrinting

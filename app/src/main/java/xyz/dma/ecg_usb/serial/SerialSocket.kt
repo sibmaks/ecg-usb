@@ -90,14 +90,14 @@ class SerialSocket(private val usbManager: UsbManager,
                 buffer.removeFirst()
                 dataListeners.forEach{ it.onLine("")}
             }
-            var nl = indexOf(buffer, '\n'.toByte())
+            var nl = buffer.indexOf('\n'.toByte())
             while (nl != -1) {
                 val line = buffer.subList(0, nl - 1).toByteArray().decodeToString()
                 dataListeners.forEach{ it.onLine(line)}
                 for(i in 0..nl) {
                     buffer.removeAt(0)
                 }
-                nl = indexOf(buffer, '\n'.toByte())
+                nl = buffer.indexOf('\n'.toByte())
             }
         } catch (e: Exception) {
             log("On new data exception.\n${e.stackTraceToString()}")
@@ -121,15 +121,6 @@ class SerialSocket(private val usbManager: UsbManager,
     }
 
     private fun isNewLine(byte: Byte) = byte == '\n'.toByte() || byte == '\r'.toByte()
-
-    private fun indexOf(list: List<Byte>, value: Byte) : Int {
-        for((i, item) in list.withIndex()) {
-            if(item == value) {
-                return i
-            }
-        }
-        return -1
-    }
 
     fun send(text: String) {
         usbSerialPort.write(text.toByteArray(), DRIVER_WRITE_TIMEOUT)

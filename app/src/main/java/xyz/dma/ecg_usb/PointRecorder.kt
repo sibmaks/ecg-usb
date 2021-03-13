@@ -1,7 +1,9 @@
 package xyz.dma.ecg_usb
 
 import android.content.Context
+import java.io.BufferedWriter
 import java.io.File
+import java.io.OutputStreamWriter
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
@@ -9,9 +11,11 @@ import java.util.concurrent.Executors
 /**
  * Created by maksim.drobyshev on 07-Mar-21.
  */
-class PointRecorder(context: Context) {
+class PointRecorder(context: Context,
+                    private val logger: (String) -> Unit) {
     private val recordsPath = File(context.filesDir, "records")
     private var recordFile: File? = null
+    private var writer: BufferedWriter? = null
     private val recordedPoints = CopyOnWriteArrayList<Int>()
     private var firstWrite = true
     private val executionService: ExecutorService
@@ -20,13 +24,16 @@ class PointRecorder(context: Context) {
         if(!recordsPath.exists()) {
             recordsPath.mkdirs()
         }
+        createFile()
         executionService = Executors.newFixedThreadPool(2)
         executionService.submit { writePoints() }
-        createFile()
     }
 
     private fun createFile() {
-        recordFile = File(recordsPath, "ecg-records-${System.currentTimeMillis()}.csv")
+        val recordFile = File(recordsPath, "ecg-records-${System.currentTimeMillis()}.csv")
+        val fileOutputString = recordFile.outputStream()
+        writer = BufferedWriter(OutputStreamWriter(fileOutputString))
+        this.recordFile = recordFile
         firstWrite = true
     }
 
@@ -35,22 +42,32 @@ class PointRecorder(context: Context) {
     }
 
     private fun writePoints() {
-        while (!Thread.currentThread().isInterrupted) {
-            val recordFile = this.recordFile ?: throw IllegalStateException("Record file not exists")
-            val lineBuilder = StringBuilder()
-            if (!firstWrite) {
-                lineBuilder.append(",")
-            }
-            var first = true
-            while (!recordedPoints.isEmpty()) {
-                if (first) {
-                    first = false
-                } else {
-                    lineBuilder.append(",")
+        try {
+            while (!Thread.currentThread().isInterrupted) {
+                if (recordedPoints.isEmpty()) {
+                    continue
                 }
-                lineBuilder.append(recordedPoints.removeAt(0))
+                var lineBuilder = StringBuilder()
+                if (!firstWrite) {
+                    lineBuilder = lineBuilder.append(",")
+                } else {
+                    firstWrite = false
+                }
+                while (!recordedPoints.isEmpty()) {
+                    lineBuilder = lineBuilder.append(recordedPoints.removeAt(0))
+                    if(!recordedPoints.isEmpty()) {
+                        lineBuilder = lineBuilder.append(",")
+                    }
+                }
+                writer?.write(lineBuilder.toString())
+                writer?.flush()
             }
-            recordFile.writeText(lineBuilder.toString())
+        } catch (e: Exception) {
+            logger(e.message ?: "null message exception")
+            logger(e.stackTraceToString())
+        } catch (e: java.lang.Exception) {
+            logger(e.message ?: "null message exception")
+            logger(e.stackTraceToString())
         }
     }
 
@@ -58,9 +75,13 @@ class PointRecorder(context: Context) {
         return this.recordFile ?: throw IllegalStateException("Record file not exists")
     }
 
+    fun close() {
+        this.writer?.close()
+    }
+
     fun reset() {
-        val recordFile = this.recordFile ?: throw IllegalStateException("Record file not exists")
-        recordFile.delete()
+        close()
+        recordFile?.delete()
         createFile()
     }
 }

@@ -2,6 +2,8 @@ package xyz.dma.ecg_usb.serial
 
 import android.app.PendingIntent
 import android.hardware.usb.UsbManager
+import android.os.Handler
+import android.os.Looper
 import com.hoho.android.usbserial.driver.CdcAcmSerialDriver
 import com.hoho.android.usbserial.driver.UsbSerialPort
 import com.hoho.android.usbserial.driver.UsbSerialProber
@@ -14,22 +16,30 @@ class SerialSocket(private val usbManager: UsbManager,
             private val logger: ((String) -> (Unit))) : SerialInputOutputManager.Listener {
     private val DRIVER_WRITE_TIMEOUT = 2000
     private val buffer: MutableList<Byte>
-    private val listeners: MutableList<SerialListener>
+    private val dataListeners: MutableList<SerialDataListener>
+    private val socketListeners: MutableList<SerialSocketListener>
     private val usbSerialProber: UsbSerialProber
     private var connected: Boolean
     private lateinit var usbSerialPort: UsbSerialPort
+    private val mainLooper: Handler
 
     init {
         val probeTable = UsbSerialProber.getDefaultProbeTable()
         probeTable.addProduct(1155, 22336, CdcAcmSerialDriver::class.java)
         usbSerialProber = UsbSerialProber(probeTable)
         buffer = CopyOnWriteArrayList()
-        listeners = CopyOnWriteArrayList()
+        dataListeners = CopyOnWriteArrayList()
+        socketListeners = CopyOnWriteArrayList()
         connected = false
+        mainLooper = Handler(Looper.getMainLooper())
     }
 
-    fun addListener(listener: SerialListener) {
-        listeners.add(listener)
+    fun addDataListener(dataListener: SerialDataListener) {
+        dataListeners.add(dataListener)
+    }
+
+    fun addSocketListener(socketListener: SerialSocketListener) {
+        socketListeners.add(socketListener)
     }
 
     fun connect() {
@@ -57,10 +67,40 @@ class SerialSocket(private val usbManager: UsbManager,
             val usbIoManager = SerialInputOutputManager(usbSerialPort, this)
             Executors.newSingleThreadExecutor().submit(usbIoManager)
             log("Device connected")
-            send("0")
             connected = true
+            mainLooper.post {
+                socketListeners.forEach{
+                    it.onConnect(this)
+                }
+            }
         } catch (e: Exception) {
             log("Error happened: ${e.message}\n${e.stackTraceToString()}")
+        }
+    }
+
+    private fun receive(data: ByteArray) {
+        if(!connected) {
+            throw IllegalStateException("Serial socket is not connected")
+        }
+        try {
+            for(a in data) {
+                buffer.add(a)
+            }
+            while (buffer.size > 0 && isNewLine(buffer[0])) {
+                buffer.removeFirst()
+                dataListeners.forEach{ it.onLine("")}
+            }
+            var nl = indexOf(buffer, '\n'.toByte())
+            while (nl != -1) {
+                val line = buffer.subList(0, nl - 1).toByteArray().decodeToString()
+                dataListeners.forEach{ it.onLine(line)}
+                for(i in 0..nl) {
+                    buffer.removeAt(0)
+                }
+                nl = indexOf(buffer, '\n'.toByte())
+            }
+        } catch (e: Exception) {
+            log("On new data exception.\n${e.stackTraceToString()}")
         }
     }
 
@@ -73,27 +113,10 @@ class SerialSocket(private val usbManager: UsbManager,
     }
 
     override fun onNewData(data: ByteArray?) {
-        try {
-            if (data != null) {
-                for(a in data) {
-                    buffer.add(a)
-                }
-                while (buffer.size > 0 && isNewLine(buffer[0])) {
-                    buffer.removeFirst()
-                    listeners.forEach{ it.onLine("")}
-                }
-                var nl = indexOf(buffer, '\n'.toByte())
-                while (nl != -1) {
-                    val line = buffer.subList(0, nl - 1).toByteArray().decodeToString()
-                    listeners.forEach{ it.onLine(line)}
-                    for(i in 0..nl) {
-                        buffer.removeAt(0)
-                    }
-                    nl = indexOf(buffer, '\n'.toByte())
-                }
+        if(data != null) {
+            mainLooper.post {
+                receive(data)
             }
-        } catch (e: Exception) {
-            log("On new data exception.\n${e.stackTraceToString()}")
         }
     }
 
@@ -130,6 +153,11 @@ class SerialSocket(private val usbManager: UsbManager,
             }
         } finally {
             connected = false
+            mainLooper.post {
+                socketListeners.forEach{
+                    it.onDisconnect(this)
+                }
+            }
         }
     }
 }

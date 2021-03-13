@@ -17,10 +17,11 @@ import androidx.core.content.FileProvider
 import com.jjoe64.graphview.GraphView
 import com.jjoe64.graphview.series.DataPoint
 import com.jjoe64.graphview.series.LineGraphSeries
-import xyz.dma.ecg_usb.serial.SerialListener
+import xyz.dma.ecg_usb.serial.SerialDataListener
 import xyz.dma.ecg_usb.serial.SerialSocket
-import java.io.File
-import java.util.concurrent.CopyOnWriteArrayList
+import xyz.dma.ecg_usb.serial.SerialSocketListener
+import xyz.dma.ecg_usb.util.isInt
+import xyz.dma.ecg_usb.util.plus
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.LinkedBlockingQueue
@@ -28,15 +29,14 @@ import kotlin.math.max
 
 
 @ExperimentalUnsignedTypes
-class MainActivity : AppCompatActivity(), SerialListener {
-    private val ACTION_USB_PERMISSION = "xyz.dma.ecg_usb.USB_PERMISSION"
+class MainActivity : AppCompatActivity(), SerialDataListener, SerialSocketListener {
     private lateinit var series: LineGraphSeries<DataPoint>
     private val ecgPoints = LinkedBlockingQueue<Int>()
-    private val recordedPoints = CopyOnWriteArrayList<Int>()
     private var recordOn: Boolean = false
     private var pointPrinting: Boolean = false
     private val executionService: ExecutorService = Executors.newFixedThreadPool(8)
     private lateinit var serialSocket: SerialSocket
+    private lateinit var pointRecorder: PointRecorder
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -58,7 +58,10 @@ class MainActivity : AppCompatActivity(), SerialListener {
             )
 
             serialSocket = SerialSocket(getSystemService(Context.USB_SERVICE) as UsbManager, permissionIntent) { log(it, false)}
-            serialSocket.addListener(this)
+            serialSocket.addDataListener(this)
+            serialSocket.addSocketListener(this)
+
+            pointRecorder = PointRecorder(this)
 
             val filter = IntentFilter(ACTION_USB_PERMISSION)
 
@@ -70,29 +73,17 @@ class MainActivity : AppCompatActivity(), SerialListener {
                     when (intent?.action) {
                         ACTION_USB_PERMISSION -> {
                             serialSocket.connect()
-                            if(serialSocket.isConnected()) {
-                                findViewById<Button>(R.id.startRecordButton).isEnabled = true
-                                findViewById<Button>(R.id.sendButton).isEnabled = true
-                            }
                         }
                         UsbManager.ACTION_USB_DEVICE_DETACHED -> {
                             try {
                                 serialSocket.close()
-                                switchStartButton(false)
                             } catch (e: Exception) {
                                 log(e.message ?: "null message exception")
                                 log(e.stackTraceToString())
-                            } finally {
-                                findViewById<Button>(R.id.startRecordButton).isEnabled = false
-                                findViewById<Button>(R.id.sendButton).isEnabled = false
                             }
                         }
                         UsbManager.ACTION_USB_DEVICE_ATTACHED -> {
                             serialSocket.connect()
-                            if(serialSocket.isConnected()) {
-                                findViewById<Button>(R.id.startRecordButton).isEnabled = true
-                                findViewById<Button>(R.id.sendButton).isEnabled = true
-                            }
                         }
                     }
                 }
@@ -106,8 +97,10 @@ class MainActivity : AppCompatActivity(), SerialListener {
             var count = 0L
             while (!Thread.interrupted()) {
                 val egcData = ecgPoints.take()
-                if(recordOn) {
-                    recordedPoints.add(egcData)
+                if(pointPrinting) {
+                    if(recordOn) {
+                        pointRecorder.onPoint(egcData)
+                    }
                     addPoint(count++, egcData)
                 }
             }
@@ -134,15 +127,15 @@ class MainActivity : AppCompatActivity(), SerialListener {
     }
 
     fun onStartButtonClick(view: View) {
-        recordOn = !recordOn
+        pointPrinting = !pointPrinting
         if(view is Button) {
-            switchStartButton(recordOn, view)
+            switchStartButton(pointPrinting, view)
         }
     }
 
     fun onRecordButtonClick(view: View) {
         if(view is ToggleButton) {
-            pointPrinting = view.isActivated
+            recordOn = view.isActivated
         }
     }
 
@@ -165,7 +158,7 @@ class MainActivity : AppCompatActivity(), SerialListener {
 
     fun onResetButtonClick(view: View) {
         executionService.submit {
-            recordedPoints.clear()
+            pointRecorder.reset()
         }
     }
 
@@ -184,23 +177,18 @@ class MainActivity : AppCompatActivity(), SerialListener {
     }
 
     fun onShareButtonClick(view: View) {
-        executionService.submit{
-            val recordsPath = File(this@MainActivity.filesDir, "records")
-            if(!recordsPath.exists()) {
-                recordsPath.mkdirs()
-            }
-            val recordFile = File(recordsPath, "ecg-records-${System.currentTimeMillis()}.csv")
-            recordFile.writeText(recordedPoints.joinToString(separator = ",") { "$it" })
+        executionService.submit {
+            val recordFile = pointRecorder.getRecordFile()
 
             val intentShareFile = Intent(Intent.ACTION_SEND)
-            intentShareFile.type = "text/csv";
+            intentShareFile.type = "text/csv"
             intentShareFile.putExtra(
                 Intent.EXTRA_STREAM,
                 FileProvider.getUriForFile(this@MainActivity, "xyz.dma.ecg_usb.FILE_PROVIDER", recordFile)
             )
-            intentShareFile.putExtra(Intent.EXTRA_TEXT, "Share file...")
+            intentShareFile.putExtra(Intent.EXTRA_TEXT, getString(R.string.share_file_text))
 
-            startActivity(Intent.createChooser(intentShareFile, "Сохранить результаты"))
+            startActivity(Intent.createChooser(intentShareFile, getString(R.string.save_result_text)))
         }
     }
 
@@ -212,5 +200,17 @@ class MainActivity : AppCompatActivity(), SerialListener {
                 log(line)
             }
         }
+    }
+
+    override fun onConnect(serialSocket: SerialSocket) {
+        findViewById<Button>(R.id.startRecordButton).isEnabled = true
+        findViewById<Button>(R.id.sendButton).isEnabled = true
+        serialSocket.send("0")
+    }
+
+    override fun onDisconnect(serialSocket: SerialSocket) {
+        findViewById<Button>(R.id.startRecordButton).isEnabled = false
+        findViewById<Button>(R.id.sendButton).isEnabled = false
+        findViewById<ToggleButton>(R.id.recordToggleButton).isEnabled = false
     }
 }

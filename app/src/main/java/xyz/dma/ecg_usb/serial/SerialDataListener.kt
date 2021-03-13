@@ -1,5 +1,5 @@
 package xyz.dma.ecg_usb.serial
 
-interface SerialListener {
+interface SerialDataListener {
     fun onLine(line: String)
 }

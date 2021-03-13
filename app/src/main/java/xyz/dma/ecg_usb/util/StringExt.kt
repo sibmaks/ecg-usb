@@ -1,4 +1,4 @@
-package xyz.dma.ecg_usb
+package xyz.dma.ecg_usb.util
 
 
 operator fun CharSequence.plus(string: String): CharSequence {

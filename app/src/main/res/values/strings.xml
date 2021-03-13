@@ -4,6 +4,8 @@
     <string name="sps_256">SPS: 256</string>
     <string name="sps_128">SPS: 128</string>
     <string name="send_button">Send</string>
+    <string name="save_result_text">Сохранить результаты</string>
+    <string name="share_file_text">Share file...</string>
     <string name="record_button">Record</string>
     <string name="recording_button">Recording</string>
-</resources>
+e</resources>

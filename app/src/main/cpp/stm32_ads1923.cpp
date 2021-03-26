@@ -69,7 +69,7 @@ void loop() {
     }
   }
 
-  if (ads1293->isDataReady()) {
+  if (ads1293->isDataReady(1)) {
     uint8_t x1 = ads1293->readRegister(ADS1293::DATA_CH1_ECG_1);
     uint8_t x2 = ads1293->readRegister(ADS1293::DATA_CH1_ECG_2);
     uint8_t x3 = ads1293->readRegister(ADS1293::DATA_CH1_ECG_3);
@@ -140,7 +140,7 @@ void setup_ECG() {
   //10. Set address 0x27 = 0x08: Configures the DRDYB source to channel 1 ECG (or fastest channel).
   ads1293->writeRegister(ADS1293::DRDYB_SRC, 0b001000);
   //11. Set address 0x2F = 0x30: Enables channel 1 ECG and channel 2 ECG for loop read-back mode.
-  ads1293->writeRegister(ADS1293::CH_CNFG, 0x30);
+  ads1293->writeRegister(ADS1293::CH_CNFG, 0x31);
   //12. Set address 0x00 = 0x01: Starts data conversion.
   ads1293->writeRegister(ADS1293::CONFIG, 0x01);
 }

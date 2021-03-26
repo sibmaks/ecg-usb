@@ -26,7 +26,9 @@ namespace ADS1293 {
 		DRDYB_SRC = 0x27,
 		CH_CNFG = 0x2F,
 		CONFIG = 0x00,
-		
+
+		DATA_STATUS = 0x30,
+
 		DATA_CH1_ECG_1 = 0x37,
 		DATA_CH1_ECG_2 = 0x38,
 		DATA_CH1_ECG_3 = 0x39,
@@ -57,7 +59,7 @@ namespace ADS1293 {
 
 		uint8_t readRegister(const Registers_e address);
 		
-		bool isDataReady();
+		bool isDataReady(uint8_t channel);
 		
 		bool readSensorID();
 	};

@@ -4,6 +4,9 @@
 #define ADS1293_CS_PIN PB0
 #define ADS1293_DR_PIN PB1
 
+#define V_REF 2.4
+#define ADC_MAX 0xB964F0
+
 boolean output_on = false;
 boolean print_time = false;
 long print_time_start;
@@ -72,10 +75,12 @@ void loop() {
     uint8_t x3 = ads1293->readRegister(ADS1293::DATA_CH1_ECG_3);
 
     // 3 8-bit registers combination on a 24 bit number
-    int32_t ecgVal = (((x1 << 8) | x2) << 8) | x3;
+    int32_t adc_out = (((x1 << 8) | x2) << 8) | x3;
+    //double ecgVal = 2.0 * V_REF * (adc_out / ADC_MAX - 0.5) / 3.5;
+    double ecgVal = V_REF * (2.0 * adc_out / ADC_MAX - 1.0) / 3.5;
 
     if (output_on || print_time && c_time - print_time_start <= print_time_duration) {
-      Serial.println(ecgVal);
+      Serial.println(ecgVal * 100000);
     } else if (print_time && c_time - print_time_start > print_time_duration) {
       print_time = false;
     }

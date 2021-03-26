@@ -17,7 +17,7 @@ namespace ADS1293 {
 
 		SPI.begin();
 		SPI.setBitOrder(MSBFIRST);
-		SPI.setDataMode(SPI_MODE0);
+		SPI.setDataMode(SPI_MODE1);
 		SPI.setClockDivider(SPI_CLOCK_DIV2);
 	}
 	

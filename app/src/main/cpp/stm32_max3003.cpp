@@ -3,7 +3,7 @@
 #define IO_DELAY 50
 #define COMMAND_MAX_LENGTH 32
 #define MAX30003_CS_PIN PB0
-#define APP_VERSION "0.0.2"
+#define APP_VERSION "1.0.0"
 
 unsigned long etagFifoOvf = 0;
 unsigned long interruptsError = 0;
@@ -167,6 +167,10 @@ void loop() {
       Serial.println("5. Print samples 1 second");
       Serial.println("6. Print samples N millisecond");
       Serial.println("7. Change Type to N");
+      Serial.println("M. Get model info in format: ECG_STM32:NAME:CHANNELS:VERSION");
+    } else if (strcmp(command, "M") == 0) {
+      Serial.print("ECG_STM32:MAX30003:1:");
+      Serial.println(VERSION);
     } else {
       Serial.print("Unknown command: '");
       Serial.print(command);

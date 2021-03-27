@@ -1,5 +1,6 @@
 #include "ADS1293.h"
 #include "CommandReader.h"
+#define VERSION "1.0.0"
 #define IO_DELAY 50
 #define ADS1293_CS_PIN PB0
 #define ADS1293_DR_PIN PB1
@@ -41,6 +42,7 @@ void loop() {
       Serial.println("5. Print samples 1 second");
       Serial.println("6. Print samples N millisecond");
       Serial.println("x. Change Type to N");
+      Serial.println("M. Get model info in format: ECG_STM32:NAME:CHANNELS:VERSION");
     } else if(strcmp(command, "1") == 0) {
       ads1293->readSensorID();
       readConfigs();
@@ -62,6 +64,9 @@ void loop() {
       Serial.println("Input N: ");
       print_time_duration = Serial.parseInt();
       print_time_start = millis();
+    } else if (strcmp(command, "M") == 0) {
+      Serial.print("ECG_STM32:ADS1293:2:");
+      Serial.println(VERSION);
     } else {
       Serial.print("Unknown command: '");
       Serial.print(command);

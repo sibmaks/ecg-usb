@@ -58,9 +58,7 @@ namespace ADS1293 {
 		void writeRegister(const Registers_e address, uint8_t data);
 
 		uint8_t readRegister(const Registers_e address);
-		
-		bool isDataReady(uint8_t channel);
-		
+
 		bool readSensorID();
 	};
 }

@@ -69,22 +69,28 @@ void loop() {
     }
   }
 
-  if (ads1293->isDataReady(1)) {
-    uint8_t x1 = ads1293->readRegister(ADS1293::DATA_CH1_ECG_1);
-    uint8_t x2 = ads1293->readRegister(ADS1293::DATA_CH1_ECG_2);
-    uint8_t x3 = ads1293->readRegister(ADS1293::DATA_CH1_ECG_3);
-
-    // 3 8-bit registers combination on a 24 bit number
-    int32_t adc_out = (((x1 << 8) | x2) << 8) | x3;
-    //double ecgVal = 2.0 * V_REF * (adc_out / ADC_MAX - 0.5) / 3.5;
-    double ecgVal = V_REF * (2.0 * adc_out / ADC_MAX - 1.0) / 3.5;
+  uint8_t dataStatus = ads1293->readRegister(ADS1293::DATA_STATUS);
+  if (((dataStatus >> 5) & 0b11) == 0b11) {
+    double ecgVal = readEcg(1);
+    double ecgVal2 = readEcg(2);
 
     if (output_on || print_time && c_time - print_time_start <= print_time_duration) {
-      Serial.println(ecgVal * 100000);
+      Serial.print(ecgVal * 1000);
+      Serial.print(",");
+      Serial.println(ecgVal2 * 1000);
     } else if (print_time && c_time - print_time_start > print_time_duration) {
       print_time = false;
     }
   }
+}
+
+double readEcg(int channel) {
+    uint8_t x1 = ads1293->readRegister((ADS1293::Registers_e)(ADS1293::DATA_CH1_ECG_1 + 3 * (channel - 1)));
+    uint8_t x2 = ads1293->readRegister((ADS1293::Registers_e)(ADS1293::DATA_CH1_ECG_2 + 3 * (channel - 1)));
+    uint8_t x3 = ads1293->readRegister((ADS1293::Registers_e)(ADS1293::DATA_CH1_ECG_3 + 3 * (channel - 1)));
+    int32_t adc_out = (((x1 << 8) | x2) << 8) | x3;
+    //double ecgVal = 2.0 * V_REF * (adc_out / ADC_MAX - 0.5) / 3.5;
+    return V_REF * (2.0 * adc_out / ADC_MAX - 1.0) / 3.5;
 }
 
 void readConfigs() {
@@ -121,8 +127,10 @@ void setup_ECG() {
   //Follow the next steps to configure the device for this example, starting from default registers values.
   //1. Set address 0x01 = 0x11: Connect channel 1’s INP to IN2 and INN to IN1.
   ads1293->writeRegister(ADS1293::FLEX_CH1_CN, 0x11);
+  //ads1293->writeRegister(ADS1293::FLEX_CH1_CN, 0x40);
   //2. Set address 0x02 = 0x19: Connect channel 2’s INP to IN3 and INN to IN1.
   ads1293->writeRegister(ADS1293::FLEX_CH2_CN, 0x19);
+  //ads1293->writeRegister(ADS1293::FLEX_CH2_CN, 0x80);
   //3. Set address 0x0A = 0x07: Enable the common-mode detector on input pins IN1, IN2 and IN3.
   ads1293->writeRegister(ADS1293::CMDET_EN, 0x07);
   //4. Set address 0x0C = 0x04: Connect the output of the RLD amplifier internally to pin IN4.

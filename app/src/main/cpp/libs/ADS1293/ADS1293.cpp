@@ -38,12 +38,7 @@ namespace ADS1293 {
 	  return data;
 	}
 	
-	bool ADS1293::isDataReady(uint8_t channel) {
-	    return (readRegister(DATA_STATUS) >> (4 + channel)) & 0x1;
-	}
-	
 	bool ADS1293::readSensorID() {
-
 	  uint8_t ID = 0xff;
 	  ID = readRegister(REVID);
 	  Serial.println(ID);

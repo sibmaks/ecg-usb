@@ -1,6 +1,5 @@
 package xyz.dma.ecg_usb
 
-import android.content.Context
 import java.io.BufferedWriter
 import java.io.File
 import java.io.OutputStreamWriter
@@ -11,12 +10,12 @@ import java.util.concurrent.Executors
 /**
  * Created by maksim.drobyshev on 07-Mar-21.
  */
-class PointRecorder(context: Context,
+class PointRecorder(fileParent: File,
                     private val logger: (String) -> Unit) {
-    private val recordsPath = File(context.filesDir, "records")
+    private val recordsPath = File(fileParent, "records")
     private var recordFile: File? = null
     private var writer: BufferedWriter? = null
-    private val recordedPoints = CopyOnWriteArrayList<Int>()
+    private val recordedPoints = CopyOnWriteArrayList<Double>()
     private var firstWrite = true
     private val executionService: ExecutorService
 
@@ -37,7 +36,7 @@ class PointRecorder(context: Context,
         firstWrite = true
     }
 
-    fun onPoint(point: Int) {
+    fun onPoint(point: Double) {
         recordedPoints.add(point)
     }
 

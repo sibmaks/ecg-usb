@@ -13,3 +13,12 @@ fun String.isInt(): Boolean {
         false
     }
 }
+
+fun String.isDouble(): Boolean {
+    return try {
+        this.toDouble()
+        true
+    } catch (e: Exception) {
+        false
+    }
+}

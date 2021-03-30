@@ -5,6 +5,7 @@ import android.view.View
 import com.jjoe64.graphview.GraphView
 import com.jjoe64.graphview.series.DataPoint
 import com.jjoe64.graphview.series.LineGraphSeries
+import java.io.File
 import java.util.concurrent.Executors
 import java.util.concurrent.LinkedBlockingQueue
 import kotlin.math.max
@@ -53,6 +54,10 @@ class Channel(private val activity: Activity,
         pointRecorder.reset()
     }
 
+    fun getRecordFile() : File {
+        return pointRecorder.getRecordFile()
+    }
+
     fun addPoint(value: Double) {
         ecgPoints.add(value)
     }
@@ -68,7 +73,7 @@ class Channel(private val activity: Activity,
         pointPrinting = false
         recordOn = false
         activity.runOnUiThread {
-            graphView.visibility = View.INVISIBLE
+            graphView.visibility = View.GONE
         }
         active = false
     }

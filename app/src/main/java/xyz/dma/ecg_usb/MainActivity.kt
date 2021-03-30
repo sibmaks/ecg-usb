@@ -13,18 +13,23 @@ import android.widget.EditText
 import android.widget.TextView
 import android.widget.ToggleButton
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.FileProvider
 import com.jjoe64.graphview.GraphView
 import xyz.dma.ecg_usb.serial.SerialDataListener
 import xyz.dma.ecg_usb.serial.SerialSocket
 import xyz.dma.ecg_usb.serial.SerialSocketListener
+import xyz.dma.ecg_usb.util.FileUtils
 import xyz.dma.ecg_usb.util.isDouble
 import xyz.dma.ecg_usb.util.plus
+import java.io.File
 import java.util.concurrent.Executors
+import java.util.concurrent.LinkedBlockingQueue
 
 
 @ExperimentalUnsignedTypes
 class MainActivity : AppCompatActivity(), SerialDataListener, SerialSocketListener {
-    private val channels: MutableMap<Int, Channel> = HashMap()
+    private val channels = HashMap<Int, Channel>()
+    private val incomingMessages = LinkedBlockingQueue<String>()
     private val executionService = Executors.newFixedThreadPool(4)
     private lateinit var serialSocket: SerialSocket
     private var activeChannels = 0
@@ -44,6 +49,7 @@ class MainActivity : AppCompatActivity(), SerialDataListener, SerialSocketListen
                 Intent(ACTION_USB_PERMISSION), 0
             )
 
+            incomingProcessing()
             serialSocket = SerialSocket(getSystemService(Context.USB_SERVICE) as UsbManager, permissionIntent) { log(it, false)}
             serialSocket.addDataListener(this)
             serialSocket.addSocketListener(this)
@@ -76,6 +82,54 @@ class MainActivity : AppCompatActivity(), SerialDataListener, SerialSocketListen
         } catch (e: Exception) {
             log(e.message ?: "null message exception")
             log(e.stackTraceToString())
+        }
+    }
+
+    private fun incomingProcessing() {
+        executionService.submit {
+            while (!Thread.currentThread().isInterrupted) {
+                val line = incomingMessages.take()
+
+                if (line.isNotEmpty()) {
+                    if (line.startsWith("ECG_STM32")) {
+                        val appInfo = line.split(":")
+                        if (appInfo.size != 4) {
+                            log("ECG_STM32 header is wrong, repeat request")
+                            serialSocket.send("M")
+                        } else {
+                            connectedBoard = appInfo[1]
+                            activeChannels = appInfo[2].toInt()
+                            log("Connected board %s, %d active channels".format(connectedBoard, activeChannels))
+                            serialSocket.send("0")
+                            for (i in channels.entries) {
+                                if (i.key > activeChannels) {
+                                    i.value.stop()
+                                } else {
+                                    i.value.start()
+                                }
+                            }
+                            runOnUiThread {
+                                findViewById<Button>(R.id.startRecordButton).isEnabled = true
+                                findViewById<Button>(R.id.sendButton).isEnabled = true
+                            }
+                        }
+                    }
+                    if (activeChannels == 1 && line.isDouble()) {
+                        channels[1]?.addPoint(line.toDouble())
+                    } else if (activeChannels > 1) {
+                        val parts = line.split(",")
+                        if (parts.size == activeChannels) {
+                            if (connectedBoard == "ADS1293") {
+                                for (i in parts.indices) {
+                                    if (parts[i].isDouble()) {
+                                        channels[i + 1]?.addPoint(parts[i].toDouble())
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -153,62 +207,44 @@ class MainActivity : AppCompatActivity(), SerialDataListener, SerialSocketListen
 
     fun onShareButtonClick(view: View) {
         executionService.submit {
-            /*val recordFile = pointRecorder.getRecordFile()
-
-            val intentShareFile = Intent(Intent.ACTION_SEND)
-            intentShareFile.type = "text/csv"
-            intentShareFile.putExtra(
-                Intent.EXTRA_STREAM,
-                FileProvider.getUriForFile(this@MainActivity, "xyz.dma.ecg_usb.FILE_PROVIDER", recordFile)
-            )
-            intentShareFile.putExtra(Intent.EXTRA_TEXT, getString(R.string.share_file_text))
-
-            startActivity(Intent.createChooser(intentShareFile, getString(R.string.save_result_text)))*/
-        }
-    }
-
-    override fun onLine(line: String) {
-        executionService.submit {
-            if (line.isNotEmpty()) {
-                if (line.startsWith("ECG_STM32")) {
-                    val appInfo = line.split(":")
-                    if (appInfo.size != 4) {
-                        log("ECG_STM32 header is wrong, repeat request")
-                        serialSocket.send("M")
-                    } else {
-                        connectedBoard = appInfo[1]
-                        activeChannels = appInfo[2].toInt()
-                        log("Connected board %s, %d active channels".format(connectedBoard, activeChannels))
-                        serialSocket.send("0")
-                        for (i in channels.entries) {
-                            if (i.key > activeChannels) {
-                                i.value.stop()
-                            } else {
-                                i.value.start()
-                            }
-                        }
-                        runOnUiThread {
-                            findViewById<Button>(R.id.startRecordButton).isEnabled = true
-                            findViewById<Button>(R.id.sendButton).isEnabled = true
-                        }
-                    }
+            val recordFiles = ArrayList<File>()
+            channels.forEach{
+                if(it.value.isActive()) {
+                    recordFiles.add(it.value.getRecordFile())
                 }
-                if (activeChannels == 1 && line.isDouble()) {
-                    channels[1]?.addPoint(line.toDouble())
-                } else if (activeChannels > 1) {
-                    val parts = line.split(",")
-                    if (parts.size == activeChannels) {
-                        if (connectedBoard == "ADS1293") {
-                            for (i in parts.indices) {
-                                if (parts[i].isDouble()) {
-                                    channels[i + 1]?.addPoint(parts[i].toDouble())
-                                }
-                            }
-                        }
-                    }
+            }
+
+            when (recordFiles.size) {
+                0 -> {
+                    return@submit
+                }
+                1 -> {
+                    val recordFile = recordFiles[0]
+                    shareFile( "text/csv", recordFile)
+                }
+                else -> {
+                    val recordFile = File(this.filesDir, "channels-${System.currentTimeMillis()}.zip")
+                    FileUtils.zip(recordFiles, recordFile)
+                    shareFile("application/zip", recordFile)
                 }
             }
         }
+    }
+
+    private fun shareFile(type: String, file: File) {
+        val intentShareFile = Intent(Intent.ACTION_SEND)
+        intentShareFile.type = type
+        intentShareFile.putExtra(
+            Intent.EXTRA_STREAM,
+            FileProvider.getUriForFile(this@MainActivity, "xyz.dma.ecg_usb.FILE_PROVIDER", file)
+        )
+        intentShareFile.putExtra(Intent.EXTRA_TEXT, getString(R.string.share_file_text))
+
+        startActivity(Intent.createChooser(intentShareFile, getString(R.string.save_result_text)))
+    }
+
+    override fun onLine(line: String) {
+        incomingMessages.add(line)
     }
 
     override fun onConnect(serialSocket: SerialSocket) {

@@ -14,11 +14,12 @@ import kotlin.math.max
  */
 class Channel(private val activity: Activity,
               private val graphView: GraphView,
-              private val logger: (String) -> Unit) {
+              name: String,
+              logger: (String) -> Unit) {
 
     private val series = LineGraphSeries<DataPoint>()
     private val ecgPoints = LinkedBlockingQueue<Double>()
-    private val pointRecorder = PointRecorder(activity.filesDir, logger)
+    private val pointRecorder = PointRecorder(activity.filesDir, "${name}-channel", logger)
     private val executionService = Executors.newFixedThreadPool(2)
     private var active = false
     var recordOn = false
@@ -57,19 +58,18 @@ class Channel(private val activity: Activity,
     }
 
     fun start() {
-        pointPrinting = true
-        graphView.visibility = View.VISIBLE
+        activity.runOnUiThread {
+            graphView.visibility = View.VISIBLE
+        }
         active = true
-    }
-
-    fun switchRecording() {
-        recordOn = !recordOn
     }
 
     fun stop() {
         pointPrinting = false
         recordOn = false
-        graphView.visibility = View.INVISIBLE
+        activity.runOnUiThread {
+            graphView.visibility = View.INVISIBLE
+        }
         active = false
     }
 
@@ -79,7 +79,7 @@ class Channel(private val activity: Activity,
 
     private fun printPoint(time: Long, value: Double) {
         activity.runOnUiThread {
-            series.appendData(DataPoint(time.toDouble(), value), true, 2000)
+            series.appendData(DataPoint(time.toDouble(), value), true, 1000)
             graphView.viewport.setMinX(max(0, time - 128 * 5).toDouble())
             graphView.viewport.setMaxX(max(128 * 5, time).toDouble())
         }

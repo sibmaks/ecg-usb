@@ -11,6 +11,7 @@ import java.util.concurrent.Executors
  * Created by maksim.drobyshev on 07-Mar-21.
  */
 class PointRecorder(fileParent: File,
+                    private val prefix: String,
                     private val logger: (String) -> Unit) {
     private val recordsPath = File(fileParent, "records")
     private var recordFile: File? = null
@@ -29,7 +30,7 @@ class PointRecorder(fileParent: File,
     }
 
     private fun createFile() {
-        val recordFile = File(recordsPath, "ecg-records-${System.currentTimeMillis()}.csv")
+        val recordFile = File(recordsPath, "${prefix}-ecg-records-${System.currentTimeMillis()}.csv")
         val fileOutputString = recordFile.outputStream()
         writer = BufferedWriter(OutputStreamWriter(fileOutputString))
         this.recordFile = recordFile

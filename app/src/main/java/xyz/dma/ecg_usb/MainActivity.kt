@@ -19,25 +19,24 @@ import xyz.dma.ecg_usb.serial.SerialSocket
 import xyz.dma.ecg_usb.serial.SerialSocketListener
 import xyz.dma.ecg_usb.util.isDouble
 import xyz.dma.ecg_usb.util.plus
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
-import java.util.concurrent.TimeUnit
 
 
 @ExperimentalUnsignedTypes
 class MainActivity : AppCompatActivity(), SerialDataListener, SerialSocketListener {
-    private val channels: MutableMap<Int, Channel> = ConcurrentHashMap()
-    private val executionService = Executors.newFixedThreadPool(2)
+    private val channels: MutableMap<Int, Channel> = HashMap()
+    private val executionService = Executors.newFixedThreadPool(4)
     private lateinit var serialSocket: SerialSocket
     private var activeChannels = 0
     private var connectedBoard: String? = null
+    private var pointPrinting = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        channels[1] = Channel(this, findViewById<View>(R.id.ecgGraph) as GraphView) {log(it)}
-        channels[2] = Channel(this, findViewById<View>(R.id.ecgGraph_2) as GraphView) {log(it)}
+        channels[1] = Channel(this, findViewById<View>(R.id.ecgGraph) as GraphView, "1") {log(it)}
+        channels[2] = Channel(this, findViewById<View>(R.id.ecgGraph_2) as GraphView, "2") {log(it)}
 
         try {
             val permissionIntent = PendingIntent.getBroadcast(
@@ -91,13 +90,9 @@ class MainActivity : AppCompatActivity(), SerialDataListener, SerialSocketListen
     }
 
     fun onStartButtonClick(view: View) {
-        channels.forEach {
-            if(it.value.isActive()) {
-                it.value.pointPrinting = !it.value.pointPrinting
-                if(view is Button) {
-                    switchStartButton(it.value.pointPrinting, view)
-                }
-            }
+        pointPrinting = !pointPrinting
+        if(view is Button) {
+            switchStartButton(view)
         }
     }
 
@@ -111,32 +106,28 @@ class MainActivity : AppCompatActivity(), SerialDataListener, SerialSocketListen
         }
     }
 
-    private fun switchStartButton(start: Boolean, view: Button = findViewById(R.id.startRecordButton)) {
-        if(start) {
+    private fun switchStartButton(view: Button = findViewById(R.id.startRecordButton)) {
+        if (pointPrinting) {
             view.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_stop, 0, 0, 0)
             channels.forEach {
-                if(it.value.isActive()) {
+                if (it.value.isActive()) {
                     it.value.pointPrinting = true
                 }
             }
             serialSocket.send("3")
-            findViewById<ToggleButton>(R.id.recordToggleButton).isEnabled = true
         } else {
             view.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_play_arrow, 0, 0, 0)
-            if(serialSocket.isConnected()) {
+            if (serialSocket.isConnected()) {
                 serialSocket.send("4")
             }
-            executionService.submit {
-                TimeUnit.SECONDS.sleep(5)
-                channels.forEach {
-                    if(it.value.isActive()) {
-                        it.value.pointPrinting = false
-                    }
+            channels.forEach {
+                if (it.value.isActive()) {
+                    it.value.pointPrinting = false
                 }
             }
-            findViewById<ToggleButton>(R.id.recordToggleButton).isEnabled = false
             findViewById<ToggleButton>(R.id.recordToggleButton).isActivated = false
         }
+        findViewById<ToggleButton>(R.id.recordToggleButton).isEnabled = pointPrinting
         serialSocket.reset()
     }
 
@@ -177,52 +168,57 @@ class MainActivity : AppCompatActivity(), SerialDataListener, SerialSocketListen
     }
 
     override fun onLine(line: String) {
-        if (line.isNotEmpty()) {
-            if (line.startsWith("ECG_STM32")) {
-                val appInfo = line.split(":")
-                if (appInfo.size != 4) {
-                    // TODO: wrong plate or read error
-                } else {
-                    connectedBoard = appInfo[1]
-                    activeChannels = appInfo[2].toInt()
-                    for (i in channels.entries) {
-                        if (i.key > activeChannels) {
-                            i.value.stop()
-                        } else {
-                            i.value.start()
+        executionService.submit {
+            if (line.isNotEmpty()) {
+                if (line.startsWith("ECG_STM32")) {
+                    val appInfo = line.split(":")
+                    if (appInfo.size != 4) {
+                        log("ECG_STM32 header is wrong, repeat request")
+                        serialSocket.send("M")
+                    } else {
+                        connectedBoard = appInfo[1]
+                        activeChannels = appInfo[2].toInt()
+                        log("Connected board %s, %d active channels".format(connectedBoard, activeChannels))
+                        serialSocket.send("0")
+                        for (i in channels.entries) {
+                            if (i.key > activeChannels) {
+                                i.value.stop()
+                            } else {
+                                i.value.start()
+                            }
+                        }
+                        runOnUiThread {
+                            findViewById<Button>(R.id.startRecordButton).isEnabled = true
+                            findViewById<Button>(R.id.sendButton).isEnabled = true
                         }
                     }
                 }
-            }
-            if (activeChannels == 1 && line.isDouble()) {
-                channels[1]?.addPoint(line.toDouble())
-            } else if (activeChannels > 1) {
-                val parts = line.split(":")
-                if (parts.size == activeChannels) {
-                    if (connectedBoard == "ADS1293") {
-                        for (i in parts.indices) {
-                            if (parts[i].isDouble()) {
-                                channels[i + 1]?.addPoint(parts[i].toDouble())
+                if (activeChannels == 1 && line.isDouble()) {
+                    channels[1]?.addPoint(line.toDouble())
+                } else if (activeChannels > 1) {
+                    val parts = line.split(",")
+                    if (parts.size == activeChannels) {
+                        if (connectedBoard == "ADS1293") {
+                            for (i in parts.indices) {
+                                if (parts[i].isDouble()) {
+                                    channels[i + 1]?.addPoint(parts[i].toDouble())
+                                }
                             }
                         }
                     }
                 }
-            } else {
-                log(line)
             }
         }
     }
 
     override fun onConnect(serialSocket: SerialSocket) {
-        runOnUiThread {
-            findViewById<Button>(R.id.startRecordButton).isEnabled = true
-            findViewById<Button>(R.id.sendButton).isEnabled = true
-        }
-        serialSocket.send("0")
+        serialSocket.send("M")
     }
 
     override fun onDisconnect(serialSocket: SerialSocket) {
+        connectedBoard = null
         runOnUiThread {
+            findViewById<Button>(R.id.startRecordButton).setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_play_arrow, 0, 0, 0)
             findViewById<Button>(R.id.startRecordButton).isEnabled = false
             findViewById<Button>(R.id.sendButton).isEnabled = false
             findViewById<ToggleButton>(R.id.recordToggleButton).isEnabled = false

@@ -8,7 +8,6 @@ import com.jjoe64.graphview.series.LineGraphSeries
 import java.io.File
 import java.util.concurrent.Executors
 import java.util.concurrent.LinkedBlockingQueue
-import kotlin.math.max
 
 /**
  * Created by maksim.drobyshev on 27-Mar-21.
@@ -30,6 +29,8 @@ class Channel(private val activity: Activity,
         graphView.addSeries(series)
         graphView.minimumWidth = 100
         graphView.viewport.isScalable = true
+        graphView.viewport.setMinX(0.0)
+        graphView.viewport.setMaxX(256.0)
         graphView.viewport.setScalableY(true)
         graphView.gridLabelRenderer.labelVerticalWidth = 180
         graphView.gridLabelRenderer.numHorizontalLabels = 15
@@ -83,10 +84,9 @@ class Channel(private val activity: Activity,
     }
 
     private fun printPoint(time: Long, value: Double) {
+        val dataPoint = DataPoint(time.toDouble(), value)
         activity.runOnUiThread {
-            series.appendData(DataPoint(time.toDouble(), value), true, 1000)
-            graphView.viewport.setMinX(max(0, time - 128 * 5).toDouble())
-            graphView.viewport.setMaxX(max(128 * 5, time).toDouble())
+            series.appendData(dataPoint, true, 2000)
         }
     }
 }

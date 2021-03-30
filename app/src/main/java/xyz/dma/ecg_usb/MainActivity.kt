@@ -90,40 +90,40 @@ class MainActivity : AppCompatActivity(), SerialDataListener, SerialSocketListen
             while (!Thread.currentThread().isInterrupted) {
                 val line = incomingMessages.take()
 
-                if (line.isNotEmpty()) {
-                    if (line.startsWith("ECG_STM32")) {
-                        val appInfo = line.split(":")
-                        if (appInfo.size != 4) {
-                            log("ECG_STM32 header is wrong, repeat request")
-                            serialSocket.send("M")
-                        } else {
-                            connectedBoard = appInfo[1]
-                            activeChannels = appInfo[2].toInt()
-                            log("Connected board %s, %d active channels".format(connectedBoard, activeChannels))
-                            serialSocket.send("0")
-                            for (i in channels.entries) {
-                                if (i.key > activeChannels) {
-                                    i.value.stop()
-                                } else {
-                                    i.value.start()
-                                }
-                            }
-                            runOnUiThread {
-                                findViewById<Button>(R.id.startRecordButton).isEnabled = true
-                                findViewById<Button>(R.id.sendButton).isEnabled = true
+                if (line.isEmpty()) {
+                    continue
+                }
+                if (line.startsWith("ECG_STM32")) {
+                    val appInfo = line.split(":")
+                    if (appInfo.size != 4) {
+                        log("ECG_STM32 header is wrong, repeat request")
+                        serialSocket.send("M")
+                    } else {
+                        connectedBoard = appInfo[1]
+                        activeChannels = appInfo[2].toInt()
+                        log("Connected board %s, %d active channels".format(connectedBoard, activeChannels))
+                        serialSocket.send("0")
+                        for (i in channels.entries) {
+                            if (i.key > activeChannels) {
+                                i.value.stop()
+                            } else {
+                                i.value.start()
                             }
                         }
+                        runOnUiThread {
+                            findViewById<Button>(R.id.startRecordButton).isEnabled = true
+                            findViewById<Button>(R.id.sendButton).isEnabled = true
+                        }
                     }
-                    if (activeChannels == 1 && line.isDouble()) {
-                        channels[1]?.addPoint(line.toDouble())
-                    } else if (activeChannels > 1) {
-                        val parts = line.split(",")
-                        if (parts.size == activeChannels) {
-                            if (connectedBoard == "ADS1293") {
-                                for (i in parts.indices) {
-                                    if (parts[i].isDouble()) {
-                                        channels[i + 1]?.addPoint(parts[i].toDouble())
-                                    }
+                } else if (activeChannels == 1 && line.isDouble()) {
+                    channels[1]?.addPoint(line.toDouble())
+                } else if (activeChannels > 1) {
+                    val parts = line.split(",")
+                    if (parts.size == activeChannels || !parts[0].isDouble()) {
+                        if (connectedBoard == "ADS1293") {
+                            for (i in parts.indices) {
+                                if (parts[i].isDouble()) {
+                                    channels[i + 1]?.addPoint(parts[i].toDouble())
                                 }
                             }
                         }

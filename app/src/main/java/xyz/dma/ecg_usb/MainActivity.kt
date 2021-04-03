@@ -8,10 +8,8 @@ import android.content.IntentFilter
 import android.hardware.usb.UsbManager
 import android.os.Bundle
 import android.view.View
-import android.widget.Button
-import android.widget.EditText
-import android.widget.TextView
-import android.widget.ToggleButton
+import android.view.ViewGroup
+import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.FileProvider
 import com.jjoe64.graphview.GraphView
@@ -39,9 +37,17 @@ class MainActivity : AppCompatActivity(), SerialDataListener, SerialSocketListen
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
-
-        channels[1] = Channel(this, findViewById<View>(R.id.ecgGraph) as GraphView, "1") {log(it)}
-        channels[2] = Channel(this, findViewById<View>(R.id.ecgGraph_2) as GraphView, "2") {log(it)}
+        val graphLayout = findViewById<LinearLayout>(R.id.graph_layout)
+        for(channel in 1..5) {
+            val graphView = GraphView(this)
+            graphView.layoutParams = ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                400
+            )
+            graphView.visibility = View.GONE
+            graphLayout.addView(graphView)
+            channels[channel] = Channel(this, graphView, "$channel") {log(it)}
+        }
 
         try {
             val permissionIntent = PendingIntent.getBroadcast(

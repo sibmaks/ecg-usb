@@ -13,7 +13,6 @@ import android.view.ViewGroup
 import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.FileProvider
-import com.github.mikephil.charting.charts.LineChart
 import xyz.dma.ecg_usb.serial.SerialDataListener
 import xyz.dma.ecg_usb.serial.SerialSocket
 import xyz.dma.ecg_usb.serial.SerialSocketListener
@@ -48,7 +47,7 @@ class MainActivity : AppCompatActivity(), SerialDataListener, SerialSocketListen
 
         val graphLayout = findViewById<LinearLayout>(R.id.graph_layout)
         for(channel in 1..5) {
-            val graphView = LineChart(this)
+            val graphView = FxLineChart(this)
             graphView.layoutParams = ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 (dpWidth - 64).toInt()

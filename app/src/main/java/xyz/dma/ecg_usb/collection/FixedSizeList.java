@@ -172,7 +172,7 @@ public class FixedSizeList<T> implements List<T> {
     @Override
     public T get(int index) {
         if(index < 0 || index > size) {
-            throw new IllegalArgumentException("index is less when zero or more when size");
+            throw new IllegalArgumentException("index is less when zero or more when size, " + index);
         }
         return content[index];
     }
@@ -182,7 +182,7 @@ public class FixedSizeList<T> implements List<T> {
         lock.lock();
         try {
             if (index < 0 || index > size) {
-                throw new IllegalArgumentException("index is less when zero or more when size");
+                throw new IllegalArgumentException("index is less when zero or more when size, " + index);
             }
 
             T old = content[index];
@@ -232,7 +232,7 @@ public class FixedSizeList<T> implements List<T> {
     @Override
     public int indexOf(@Nullable @org.jetbrains.annotations.Nullable Object o) {
         T[] content = this.content;
-        for(int index = 0; index <= size; index++) {
+        for(int index = 0; index < size; index++) {
             if(Objects.equals(o, content[index])) {
                 return index;
             }
@@ -243,7 +243,7 @@ public class FixedSizeList<T> implements List<T> {
     @Override
     public int lastIndexOf(@Nullable @org.jetbrains.annotations.Nullable Object o) {
         T[] content = this.content;
-        for(int index = size; index > 0; index--) {
+        for(int index = size - 1; index > 0; index--) {
             if(Objects.equals(o, content[index])) {
                 return index;
             }

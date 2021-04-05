@@ -96,19 +96,10 @@ class Channel(private val activity: Activity,
                     if (now - time >= 1000f / 60f) {
                         if (points.size > 0) {
                             activity.runOnUiThread {
-                                var notified = false
-                                if(lineChart.xAxis.axisMinimum != points[0].x) {
-                                    lineChart.xAxis.axisMinimum = points[0].x
+                                if (points.last().x != lastPoint) {
+                                    lastPoint = points.last().x
                                     lineData.notifyDataChanged()
                                     lineChart.notifyDataSetChanged()
-                                    notified = true
-                                }
-                                if(points.last().x != lastPoint) {
-                                    lastPoint = points.last().x
-                                    if(!notified) {
-                                        lineData.notifyDataChanged()
-                                        lineChart.notifyDataSetChanged()
-                                    }
                                     lineChart.moveViewToX(0f.coerceAtLeast(lastPoint - lineChart.visibleXRange))
                                 }
                             }

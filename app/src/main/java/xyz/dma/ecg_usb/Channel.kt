@@ -9,11 +9,11 @@ import com.github.mikephil.charting.data.Entry
 import com.github.mikephil.charting.data.LineData
 import com.github.mikephil.charting.data.LineDataSet
 import com.github.mikephil.charting.utils.ColorTemplate
+import xyz.dma.ecg_usb.collection.FixedSizeList
 import xyz.dma.ecg_usb.util.ResourceUtils
 import java.io.File
 import java.util.concurrent.Executors
 import java.util.concurrent.LinkedBlockingQueue
-import java.util.concurrent.TimeUnit
 
 /**
  * Created by maksim.drobyshev on 27-Mar-21.
@@ -22,13 +22,10 @@ class Channel(private val activity: Activity,
               private val lineChart: LineChart,
               name: String,
               logger: (String) -> Unit) {
-    private val minX = 0
-    private val maxX = 5000
-    private val deltaX = maxX - minX
-
     private val ecgPoints = LinkedBlockingQueue<Double>()
     private val pointRecorder = PointRecorder(activity.filesDir, "${name}-channel", logger)
     private val executionService = Executors.newFixedThreadPool(2)
+    private val points = FixedSizeList<Entry>(10000)
     private var active = false
     var recordOn = false
     var pointPrinting = false
@@ -45,23 +42,17 @@ class Channel(private val activity: Activity,
 
         lineChart.xAxis.setDrawAxisLine(true)
         lineChart.xAxis.setDrawGridLines(true)
-        lineChart.xAxis.axisMinimum = minX.toFloat()
-        lineChart.xAxis.axisMaximum = maxX.toFloat()
-        //lineChart.xAxis.granularity = 5.0f
+        lineChart.xAxis.axisMinimum = 0f
+        lineChart.xAxis.axisMaximum = Float.MAX_VALUE - 1f
+        lineChart.setVisibleXRangeMaximum(2000f)
 
 
         lineChart.axisLeft.setDrawAxisLine(true)
         lineChart.axisLeft.setDrawGridLines(true)
-        //lineChart.axisLeft.granularity = 100f
 
         lineChart.visibility = View.GONE
 
-        val list = ArrayList<Entry>()
-        for(i in minX..maxX) {
-            list.add(Entry(i.toFloat(), 0f))
-        }
-
-        val lineDataSet = LineDataSet(list, "DataSet")
+        val lineDataSet = LineDataSet(points, "DataSet")
         lineDataSet.axisDependency = AxisDependency.LEFT
         lineDataSet.color = ColorTemplate.getHoloBlue()
         lineDataSet.valueTextColor = ColorTemplate.getHoloBlue()
@@ -80,32 +71,55 @@ class Channel(private val activity: Activity,
         lineChart.data = lineData
 
         executionService.submit {
-            var count = 0
-            while (!Thread.interrupted()) {
-                val egcData = ecgPoints.take()
-                if(pointPrinting) {
-                    if(recordOn) {
-                        pointRecorder.onPoint(egcData)
-                    }
-                    printPoint(count++, egcData)
-                    if(count == deltaX) {
-                        count = 0
+            try {
+                var count = 0
+                while (!Thread.interrupted()) {
+                    val egcData = ecgPoints.take()
+                    if (pointPrinting) {
+                        if (recordOn) {
+                            pointRecorder.onPoint(egcData)
+                        }
+                        printPoint(count++, egcData)
                     }
                 }
+            } catch (e: Exception) {
+                logger(e.message ?: "null message exception")
+                logger(e.stackTraceToString())
             }
         }
         executionService.submit {
-            var time = System.currentTimeMillis()
-            while (!Thread.interrupted()) {
-                val now = System.currentTimeMillis()
-                if(now - time >= 1000f / 60f) {
-                    lineChart.postInvalidate()
-                    time = now
-                } else {
-                    TimeUnit.MILLISECONDS.sleep((now - time) / 2)
+            try {
+                var time = System.currentTimeMillis()
+                var lastPoint = 0f
+                while (!Thread.interrupted()) {
+                    val now = System.currentTimeMillis()
+                    if (now - time >= 1000f / 60f) {
+                        if (points.size > 0) {
+                            activity.runOnUiThread {
+                                var notified = false
+                                if(lineChart.xAxis.axisMinimum != points[0].x) {
+                                    lineChart.xAxis.axisMinimum = points[0].x
+                                    lineData.notifyDataChanged()
+                                    lineChart.notifyDataSetChanged()
+                                    notified = true
+                                }
+                                if(points.last().x != lastPoint) {
+                                    lastPoint = points.last().x
+                                    if(!notified) {
+                                        lineData.notifyDataChanged()
+                                        lineChart.notifyDataSetChanged()
+                                    }
+                                    lineChart.moveViewToX(0f.coerceAtLeast(lastPoint - lineChart.visibleXRange))
+                                }
+                            }
+                        }
+                        time = now
+                    }
                 }
+            } catch (e: Exception) {
+                logger(e.message ?: "null message exception")
+                logger(e.stackTraceToString())
             }
-
         }
     }
 
@@ -148,7 +162,6 @@ class Channel(private val activity: Activity,
     }
 
     private fun printPoint(time: Int, value: Double) {
-        lineChart.data.dataSets[0].getEntryForIndex(time).y = value.toFloat()
-        //lineChart.postInvalidate()
+        points.add(Entry(time.toFloat(), value.toFloat()))
     }
 }

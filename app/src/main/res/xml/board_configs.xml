@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <entry key="ADS1293_min">-2000000</entry>
+    <entry key="ADS1293_max">2000000</entry>
+    <entry key="MAX30003_min">-200000</entry>
+    <entry key="MAX30003_max">2000000</entry>
+</resources>

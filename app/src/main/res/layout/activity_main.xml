@@ -7,23 +7,12 @@
         android:layout_height="match_parent"
         android:keepScreenOn="true"
         tools:context=".MainActivity">
-    <androidx.constraintlayout.widget.ConstraintLayout
-            android:layout_width="match_parent"
-            android:layout_height="32dp"
-            app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintEnd_toStartOf="@id/infoScrollView"
-            android:id="@+id/infoPanel"
-            app:layout_constraintTop_toTopOf="parent"
-            app:layout_constraintBottom_toTopOf="@+id/infoScrollView"
-            android:layout_marginTop="8dp"
-            android:layout_marginBottom="8dp"/>
     <ScrollView
             android:layout_width="match_parent"
-            android:layout_height="0dp"
-            app:layout_constraintStart_toEndOf="@id/infoPanel"
+            android:layout_height="match_parent"
             app:layout_constraintEnd_toEndOf="parent"
             android:id="@+id/infoScrollView"
-            app:layout_constraintTop_toBottomOf="@+id/infoPanel"
+            app:layout_constraintTop_toTopOf="parent"
             app:layout_constraintBottom_toBottomOf="parent">
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
                       android:orientation="vertical">

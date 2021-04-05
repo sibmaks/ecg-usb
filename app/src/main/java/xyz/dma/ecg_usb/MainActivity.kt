@@ -7,12 +7,13 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.hardware.usb.UsbManager
 import android.os.Bundle
+import android.util.DisplayMetrics
 import android.view.View
 import android.view.ViewGroup
 import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.FileProvider
-import com.jjoe64.graphview.GraphView
+import com.github.mikephil.charting.charts.LineChart
 import xyz.dma.ecg_usb.serial.SerialDataListener
 import xyz.dma.ecg_usb.serial.SerialSocket
 import xyz.dma.ecg_usb.serial.SerialSocketListener
@@ -22,6 +23,9 @@ import xyz.dma.ecg_usb.util.plus
 import java.io.File
 import java.util.concurrent.Executors
 import java.util.concurrent.LinkedBlockingQueue
+
+
+
 
 
 @ExperimentalUnsignedTypes
@@ -37,12 +41,17 @@ class MainActivity : AppCompatActivity(), SerialDataListener, SerialSocketListen
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+
+        val displayMetrics: DisplayMetrics = resources.displayMetrics
+        val dpWidth = displayMetrics.widthPixels / displayMetrics.density
+        //val dpHeight = displayMetrics.heightPixels / displayMetrics.density
+
         val graphLayout = findViewById<LinearLayout>(R.id.graph_layout)
         for(channel in 1..5) {
-            val graphView = GraphView(this)
+            val graphView = LineChart(this)
             graphView.layoutParams = ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
-                400
+                (dpWidth - 64).toInt()
             )
             graphView.visibility = View.GONE
             graphLayout.addView(graphView)
@@ -106,6 +115,14 @@ class MainActivity : AppCompatActivity(), SerialDataListener, SerialSocketListen
                         serialSocket.send("M")
                     } else {
                         connectedBoard = appInfo[1]
+                        try {
+                            for (channel in channels) {
+                                channel.value.onBoardChange(appInfo[1])
+                            }
+                        } catch (e: Exception) {
+                            log(e.message ?: "null message exception")
+                            log(e.stackTraceToString())
+                        }
                         activeChannels = appInfo[2].toInt()
                         log("Connected board %s, %d active channels".format(connectedBoard, activeChannels))
                         serialSocket.send("0")

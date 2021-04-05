@@ -1,23 +1,31 @@
 package xyz.dma.ecg_usb
 
 import android.app.Activity
+import android.graphics.Color
 import android.view.View
-import com.jjoe64.graphview.GraphView
-import com.jjoe64.graphview.series.DataPoint
-import com.jjoe64.graphview.series.LineGraphSeries
+import com.github.mikephil.charting.charts.LineChart
+import com.github.mikephil.charting.components.YAxis.AxisDependency
+import com.github.mikephil.charting.data.Entry
+import com.github.mikephil.charting.data.LineData
+import com.github.mikephil.charting.data.LineDataSet
+import com.github.mikephil.charting.utils.ColorTemplate
+import xyz.dma.ecg_usb.util.ResourceUtils
 import java.io.File
 import java.util.concurrent.Executors
 import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.TimeUnit
 
 /**
  * Created by maksim.drobyshev on 27-Mar-21.
  */
 class Channel(private val activity: Activity,
-              private val graphView: GraphView,
+              private val lineChart: LineChart,
               name: String,
               logger: (String) -> Unit) {
+    private val minX = 0
+    private val maxX = 5000
+    private val deltaX = maxX - minX
 
-    private val series = LineGraphSeries<DataPoint>()
     private val ecgPoints = LinkedBlockingQueue<Double>()
     private val pointRecorder = PointRecorder(activity.filesDir, "${name}-channel", logger)
     private val executionService = Executors.newFixedThreadPool(2)
@@ -26,19 +34,53 @@ class Channel(private val activity: Activity,
     var pointPrinting = false
 
     init {
-        graphView.addSeries(series)
-        graphView.minimumWidth = 100
-        graphView.viewport.isScalable = true
-        graphView.viewport.setMinX(0.0)
-        graphView.viewport.setMaxX(256.0)
-        graphView.viewport.setScalableY(true)
-        graphView.gridLabelRenderer.labelVerticalWidth = 180
-        graphView.gridLabelRenderer.numHorizontalLabels = 15
-        graphView.gridLabelRenderer.numVerticalLabels = 15
-        graphView.gridLabelRenderer.isHorizontalLabelsVisible = false
+        lineChart.setTouchEnabled(true)
+        lineChart.isDragEnabled = true
+        lineChart.setScaleEnabled(true)
+        lineChart.setDrawGridBackground(true)
+        lineChart.setPinchZoom(true)
+        lineChart.setBackgroundColor(Color.WHITE)
+        lineChart.legend.isEnabled = false
+        lineChart.description.isEnabled = false
+
+        lineChart.xAxis.setDrawAxisLine(true)
+        lineChart.xAxis.setDrawGridLines(true)
+        lineChart.xAxis.axisMinimum = minX.toFloat()
+        lineChart.xAxis.axisMaximum = maxX.toFloat()
+        //lineChart.xAxis.granularity = 5.0f
+
+
+        lineChart.axisLeft.setDrawAxisLine(true)
+        lineChart.axisLeft.setDrawGridLines(true)
+        //lineChart.axisLeft.granularity = 100f
+
+        lineChart.visibility = View.GONE
+
+        val list = ArrayList<Entry>()
+        for(i in minX..maxX) {
+            list.add(Entry(i.toFloat(), 0f))
+        }
+
+        val lineDataSet = LineDataSet(list, "DataSet")
+        lineDataSet.axisDependency = AxisDependency.LEFT
+        lineDataSet.color = ColorTemplate.getHoloBlue()
+        lineDataSet.valueTextColor = ColorTemplate.getHoloBlue()
+        lineDataSet.lineWidth = 1.5f
+        lineDataSet.setDrawCircles(false)
+        lineDataSet.setDrawValues(false)
+        lineDataSet.fillAlpha = 65
+        lineDataSet.fillColor = ColorTemplate.getHoloBlue()
+        lineDataSet.highLightColor = Color.rgb(244, 117, 117)
+        lineDataSet.setDrawCircleHole(false)
+
+        val lineData = LineData(lineDataSet)
+        lineData.setValueTextColor(Color.WHITE)
+        lineData.setValueTextSize(9f)
+
+        lineChart.data = lineData
 
         executionService.submit {
-            var count = 0L
+            var count = 0
             while (!Thread.interrupted()) {
                 val egcData = ecgPoints.take()
                 if(pointPrinting) {
@@ -46,8 +88,24 @@ class Channel(private val activity: Activity,
                         pointRecorder.onPoint(egcData)
                     }
                     printPoint(count++, egcData)
+                    if(count == deltaX) {
+                        count = 0
+                    }
                 }
             }
+        }
+        executionService.submit {
+            var time = System.currentTimeMillis()
+            while (!Thread.interrupted()) {
+                val now = System.currentTimeMillis()
+                if(now - time >= 1000f / 60f) {
+                    lineChart.postInvalidate()
+                    time = now
+                } else {
+                    TimeUnit.MILLISECONDS.sleep((now - time) / 2)
+                }
+            }
+
         }
     }
 
@@ -65,7 +123,7 @@ class Channel(private val activity: Activity,
 
     fun start() {
         activity.runOnUiThread {
-            graphView.visibility = View.VISIBLE
+            lineChart.visibility = View.VISIBLE
         }
         active = true
     }
@@ -74,7 +132,7 @@ class Channel(private val activity: Activity,
         pointPrinting = false
         recordOn = false
         activity.runOnUiThread {
-            graphView.visibility = View.GONE
+            lineChart.visibility = View.GONE
         }
         active = false
     }
@@ -83,10 +141,14 @@ class Channel(private val activity: Activity,
         return active
     }
 
-    private fun printPoint(time: Long, value: Double) {
-        val dataPoint = DataPoint(time.toDouble(), value)
-        activity.runOnUiThread {
-            series.appendData(dataPoint, true, 2000)
-        }
+    fun onBoardChange(boardName: String) {
+        val boardConfigs = ResourceUtils.getHashMapResource(activity, R.xml.board_configs)
+        lineChart.axisLeft.axisMinimum = boardConfigs["${boardName}_min"]?.toFloat() ?: throw IllegalStateException("${boardName}_min not defined")
+        lineChart.axisLeft.axisMaximum = boardConfigs["${boardName}_max"]?.toFloat() ?: throw IllegalStateException("${boardName}_max not defined")
+    }
+
+    private fun printPoint(time: Int, value: Double) {
+        lineChart.data.dataSets[0].getEntryForIndex(time).y = value.toFloat()
+        //lineChart.postInvalidate()
     }
 }

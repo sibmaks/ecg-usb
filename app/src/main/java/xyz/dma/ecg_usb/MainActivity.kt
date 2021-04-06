@@ -13,18 +13,16 @@ import android.view.ViewGroup
 import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.FileProvider
+import com.github.mikephil.charting.charts.LineChart
 import xyz.dma.ecg_usb.serial.SerialDataListener
 import xyz.dma.ecg_usb.serial.SerialSocket
 import xyz.dma.ecg_usb.serial.SerialSocketListener
 import xyz.dma.ecg_usb.util.FileUtils
-import xyz.dma.ecg_usb.util.isDouble
+import xyz.dma.ecg_usb.util.isInt
 import xyz.dma.ecg_usb.util.plus
 import java.io.File
 import java.util.concurrent.Executors
 import java.util.concurrent.LinkedBlockingQueue
-
-
-
 
 
 @ExperimentalUnsignedTypes
@@ -41,21 +39,7 @@ class MainActivity : AppCompatActivity(), SerialDataListener, SerialSocketListen
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        val displayMetrics: DisplayMetrics = resources.displayMetrics
-        val dpWidth = displayMetrics.widthPixels / displayMetrics.density
-        //val dpHeight = displayMetrics.heightPixels / displayMetrics.density
-
-        val graphLayout = findViewById<LinearLayout>(R.id.graph_layout)
-        for(channel in 1..5) {
-            val graphView = FxLineChart(this)
-            graphView.layoutParams = ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                (dpWidth - 64).toInt()
-            )
-            graphView.visibility = View.GONE
-            graphLayout.addView(graphView)
-            channels[channel] = Channel(this, graphView, "$channel") {log(it)}
-        }
+        initChannels()
 
         try {
             val permissionIntent = PendingIntent.getBroadcast(
@@ -63,7 +47,8 @@ class MainActivity : AppCompatActivity(), SerialDataListener, SerialSocketListen
                 Intent(ACTION_USB_PERMISSION), 0
             )
 
-            incomingProcessing()
+            startIncomingProcessing()
+            startChannelRefresher()
             serialSocket = SerialSocket(getSystemService(Context.USB_SERVICE) as UsbManager, permissionIntent) { log(it, false)}
             serialSocket.addDataListener(this)
             serialSocket.addSocketListener(this)
@@ -93,13 +78,55 @@ class MainActivity : AppCompatActivity(), SerialDataListener, SerialSocketListen
                     }
                 }
             }, filter)
+
+            // Try connect
+            serialSocket.connect()
         } catch (e: Exception) {
             log(e.message ?: "null message exception")
             log(e.stackTraceToString())
         }
     }
 
-    private fun incomingProcessing() {
+    private fun initChannels() {
+        val displayMetrics: DisplayMetrics = resources.displayMetrics
+        val dpWidth = displayMetrics.widthPixels / displayMetrics.density
+
+        val graphLayout = findViewById<LinearLayout>(R.id.graph_layout)
+        for(channel in 1..5) {
+            val graphView = LineChart(this)
+            graphView.layoutParams = ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                (dpWidth - 64).toInt()
+            )
+            graphView.visibility = View.GONE
+            graphLayout.addView(graphView)
+            channels[channel] = Channel(this, graphView, "$channel") {log(it)}
+        }
+    }
+
+    private fun startChannelRefresher() {
+        executionService.submit {
+            try {
+                var time = System.currentTimeMillis()
+                while (!Thread.interrupted()) {
+                    val now = System.currentTimeMillis()
+                    if (now - time >= (1000f / 60f)) {
+                        for(channel in channels.values) {
+                            if(channel.isActive()) {
+                                channel.refresh()
+                            }
+                        }
+                        time = now
+                    }
+                }
+            } catch (e: Exception) {
+                log(e.message ?: "null message exception")
+                log(e.stackTraceToString())
+            }
+        }
+    }
+
+    private fun startIncomingProcessing() {
         executionService.submit {
             while (!Thread.currentThread().isInterrupted) {
                 val line = incomingMessages.take()
@@ -137,15 +164,15 @@ class MainActivity : AppCompatActivity(), SerialDataListener, SerialSocketListen
                             findViewById<Button>(R.id.sendButton).isEnabled = true
                         }
                     }
-                } else if (activeChannels == 1 && line.isDouble()) {
-                    channels[1]?.addPoint(line.toDouble())
+                } else if (activeChannels == 1 && line.isInt()) {
+                    channels[1]?.addPoint(line.toInt())
                 } else if (activeChannels > 1) {
                     val parts = line.split(",")
-                    if (parts.size == activeChannels || !parts[0].isDouble()) {
+                    if (parts.size == activeChannels || !parts[0].isInt()) {
                         if (connectedBoard == "ADS1293") {
                             for (i in parts.indices) {
-                                if (parts[i].isDouble()) {
-                                    channels[i + 1]?.addPoint(parts[i].toDouble())
+                                if (parts[i].isInt()) {
+                                    channels[i + 1]?.addPoint(parts[i].toInt())
                                 }
                             }
                         }
@@ -275,6 +302,10 @@ class MainActivity : AppCompatActivity(), SerialDataListener, SerialSocketListen
 
     override fun onDisconnect(serialSocket: SerialSocket) {
         connectedBoard = null
+        pointPrinting = false
+        channels.forEach {
+            it.value.stop()
+        }
         runOnUiThread {
             findViewById<Button>(R.id.startRecordButton).setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_play_arrow, 0, 0, 0)
             findViewById<Button>(R.id.startRecordButton).isEnabled = false

@@ -16,7 +16,7 @@ class PointRecorder(fileParent: File,
     private val recordsPath = File(fileParent, "records")
     private var recordFile: File? = null
     private var writer: BufferedWriter? = null
-    private val recordedPoints = CopyOnWriteArrayList<Double>()
+    private val recordedPoints = CopyOnWriteArrayList<Int>()
     private var firstWrite = true
     private val executionService: ExecutorService
 
@@ -25,7 +25,7 @@ class PointRecorder(fileParent: File,
             recordsPath.mkdirs()
         }
         createFile()
-        executionService = Executors.newFixedThreadPool(2)
+        executionService = Executors.newSingleThreadExecutor()
         executionService.submit { writePoints() }
     }
 
@@ -37,7 +37,7 @@ class PointRecorder(fileParent: File,
         firstWrite = true
     }
 
-    fun onPoint(point: Double) {
+    fun onPoint(point: Int) {
         recordedPoints.add(point)
     }
 
@@ -75,7 +75,7 @@ class PointRecorder(fileParent: File,
         return this.recordFile ?: throw IllegalStateException("Record file not exists")
     }
 
-    fun close() {
+    private fun close() {
         this.writer?.close()
     }
 

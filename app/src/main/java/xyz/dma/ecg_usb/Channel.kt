@@ -9,7 +9,6 @@ import com.github.mikephil.charting.data.Entry
 import com.github.mikephil.charting.data.LineData
 import com.github.mikephil.charting.data.LineDataSet
 import com.github.mikephil.charting.utils.ColorTemplate
-import xyz.dma.ecg_usb.collection.FixedSizeList
 import xyz.dma.ecg_usb.util.ResourceUtils
 import java.io.File
 import java.util.concurrent.Executors
@@ -22,10 +21,9 @@ class Channel(private val activity: Activity,
               private val lineChart: LineChart,
               name: String,
               logger: (String) -> Unit) {
-    private val ecgPoints = LinkedBlockingQueue<Double>()
+    private val ecgPoints = LinkedBlockingQueue<Int>()
     private val pointRecorder = PointRecorder(activity.filesDir, "${name}-channel", logger)
-    private val executionService = Executors.newFixedThreadPool(2)
-    private val points = FixedSizeList<Entry>(10000)
+    private val executionService = Executors.newSingleThreadExecutor()
     private var active = false
     var recordOn = false
     var pointPrinting = false
@@ -43,14 +41,18 @@ class Channel(private val activity: Activity,
         lineChart.xAxis.setDrawAxisLine(true)
         lineChart.xAxis.setDrawGridLines(true)
         lineChart.xAxis.axisMinimum = 0f
-        lineChart.xAxis.axisMaximum = Float.MAX_VALUE - 1f
-        lineChart.setVisibleXRangeMaximum(2000f)
-
+        lineChart.xAxis.axisMaximum = 8000f
 
         lineChart.axisLeft.setDrawAxisLine(true)
         lineChart.axisLeft.setDrawGridLines(true)
 
         lineChart.visibility = View.GONE
+
+        val points = ArrayList<Entry>()
+
+        for(i in (lineChart.xAxis.axisMinimum.toInt())..(lineChart.xAxis.axisMaximum.toInt())) {
+            points.add(Entry(i.toFloat(), 0f))
+        }
 
         val lineDataSet = LineDataSet(points, "DataSet")
         lineDataSet.axisDependency = AxisDependency.LEFT
@@ -72,7 +74,9 @@ class Channel(private val activity: Activity,
 
         executionService.submit {
             try {
-                var count = 0
+                val min = lineChart.xAxis.axisMinimum.toInt()
+                val max = lineChart.xAxis.axisMaximum.toInt()
+                var count = min
                 while (!Thread.interrupted()) {
                     val egcData = ecgPoints.take()
                     if (pointPrinting) {
@@ -80,31 +84,9 @@ class Channel(private val activity: Activity,
                             pointRecorder.onPoint(egcData)
                         }
                         printPoint(count++, egcData)
-                    }
-                }
-            } catch (e: Exception) {
-                logger(e.message ?: "null message exception")
-                logger(e.stackTraceToString())
-            }
-        }
-        executionService.submit {
-            try {
-                var time = System.currentTimeMillis()
-                var lastPoint = 0f
-                while (!Thread.interrupted()) {
-                    val now = System.currentTimeMillis()
-                    if (now - time >= 1000f / 60f) {
-                        if (points.size > 0) {
-                            activity.runOnUiThread {
-                                if (points.last().x != lastPoint) {
-                                    lastPoint = points.last().x
-                                    lineData.notifyDataChanged()
-                                    lineChart.notifyDataSetChanged()
-                                    lineChart.moveViewToX(0f.coerceAtLeast(lastPoint - lineChart.visibleXRange))
-                                }
-                            }
+                        if(count >= max) {
+                            count = min
                         }
-                        time = now
                     }
                 }
             } catch (e: Exception) {
@@ -112,6 +94,10 @@ class Channel(private val activity: Activity,
                 logger(e.stackTraceToString())
             }
         }
+    }
+
+    fun refresh() {
+        lineChart.postInvalidate()
     }
 
     fun reset() {
@@ -122,7 +108,7 @@ class Channel(private val activity: Activity,
         return pointRecorder.getRecordFile()
     }
 
-    fun addPoint(value: Double) {
+    fun addPoint(value: Int) {
         ecgPoints.add(value)
     }
 
@@ -152,7 +138,7 @@ class Channel(private val activity: Activity,
         lineChart.axisLeft.axisMaximum = boardConfigs["${boardName}_max"]?.toFloat() ?: throw IllegalStateException("${boardName}_max not defined")
     }
 
-    private fun printPoint(time: Int, value: Double) {
-        points.add(Entry(time.toFloat(), value.toFloat()))
+    private fun printPoint(time: Int, value: Int) {
+        lineChart.data.dataSets[0].getEntryForIndex(time).y = value.toFloat()
     }
 }

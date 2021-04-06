@@ -115,8 +115,8 @@ public class FxLineChartRenderer extends LineChartRenderer {
             Entry entryFrom = dataSet.getEntryForXValue(low, Float.NaN, DataSet.Rounding.DOWN);
             Entry entryTo = dataSet.getEntryForXValue(high, Float.NaN, DataSet.Rounding.UP);
 
-            min = entryFrom == null ? 0 : Math.max(0, dataSet.getEntryIndex(entryFrom));
-            max = entryTo == null ? 0 : Math.max(0, dataSet.getEntryIndex(entryTo));
+            min = Math.min(min, entryFrom == null ? 0 : dataSet.getEntryIndex(entryFrom));
+            max = Math.max(max, entryTo == null ? 0 : dataSet.getEntryIndex(entryTo));
             range = (int) ((max - min) * phaseX);
         }
     }

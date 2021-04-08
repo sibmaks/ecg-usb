@@ -1,0 +1,12 @@
+<resources>
+    <string name="app_name">ECG USB</string>
+    <string name="sps_512">SPS: 512</string>
+    <string name="sps_256">SPS: 256</string>
+    <string name="sps_128">SPS: 128</string>
+    <string name="send_button">Отправить</string>
+    <string name="save_result_text">Сохранить результаты</string>
+    <string name="share_file_text">Поделиться…</string>
+    <string name="record_button">Запись</string>
+    <string name="recording_button">Записываю</string>
+    <string name="reset_button">Сбросить</string>
+e</resources>

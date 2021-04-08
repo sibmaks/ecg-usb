@@ -1,5 +1,6 @@
 #include "ADS1293.h"
 #include "CommandReader.h"
+
 #define VERSION "1.0.0"
 
 #define ADS1293_CS_PIN PB0
@@ -55,6 +56,7 @@ void loop() {
       output_on = false;
       print_time = true;
       counter  = 4267;
+      print_time_start = millis();
     } else if (strcmp(command, "6") == 0) {
       output_on = false;
       print_time = true;
@@ -70,7 +72,7 @@ void loop() {
     } else {
       Serial.print("Unknown command: '");
       Serial.print(command);
-      Serial.println("'");
+      Serial.println('\'');
     }
   }
 
@@ -81,12 +83,14 @@ void loop() {
 
     if (output_on || print_time && counter-- > 0) {
       Serial.print(ecgVal);
-      Serial.print(",");
+      Serial.write(',');
       Serial.print(ecgVal2);
-      Serial.print(",");
+      Serial.write(',');
       Serial.println(ecgVal3);
     } else if (print_time && counter <= 0) {
       print_time = false;
+      Serial.print("Send: ");
+      Serial.println(millis() - print_time_start);
     }
   }
 }

@@ -18,11 +18,13 @@ namespace ADS1293 {
 		WILSON_EN3 = 0x0F,
 		WILSON_CN = 0x10,
 		OSC_CN = 0x12,
+		AFE_RES = 0x13,
 		AFE_SHDN_CN = 0x14,
 		R2_RATE = 0x21,
 		R3_RATE_CH1 = 0x22,
 		R3_RATE_CH2 = 0x23,
 		R3_RATE_CH3 = 0x24,
+		R1_RATE = 0x25,
 		DRDYB_SRC = 0x27,
 		CH_CNFG = 0x2F,
 		CONFIG = 0x00,
@@ -32,26 +34,22 @@ namespace ADS1293 {
 		DATA_CH1_ECG_1 = 0x37,
 		DATA_CH1_ECG_2 = 0x38,
 		DATA_CH1_ECG_3 = 0x39,
-		
+
 		DATA_CH2_ECG_1 = 0x3A,
 		DATA_CH2_ECG_2 = 0x3B,
 		DATA_CH2_ECG_3 = 0x3C,
-		
+
 		REVID = 0x40
 	};
 
 	class ADS1293
 	{
 	private:
-		uint8_t buff[4] = {0};
 		int csPin;
 		int dataReadyPin;
-		int ioDelay;
-
-		void switchClock(bool on);
 
 	public:
-		ADS1293(int csPin, int dataReadyPin, int ioDelay);
+		ADS1293(int csPin, int dataReadyPin);
 
 		void begin();
 
@@ -59,7 +57,11 @@ namespace ADS1293 {
 
 		uint8_t readRegister(const Registers_e address);
 
+		int32_t readECG(uint8_t channel, uint32_t vRef, uint32_t adcMax);
+
 		bool readSensorID();
+
+		bool isDataReady();
 	};
 }
 

@@ -15,7 +15,7 @@ class PointRecorder(fileParent: File,
                     private val logger: (String) -> Unit) {
     private val recordsPath = File(fileParent, "records")
     private var recordFile: File? = null
-    private var writer: BufferedWriter? = null
+    private lateinit var writer: BufferedWriter
     private val recordedPoints = CopyOnWriteArrayList<Int>()
     private var firstWrite = true
     private val executionService: ExecutorService
@@ -59,8 +59,8 @@ class PointRecorder(fileParent: File,
                         lineBuilder = lineBuilder.append(",")
                     }
                 }
-                writer?.write(lineBuilder.toString())
-                writer?.flush()
+                writer.write(lineBuilder.toString())
+                writer.flush()
             }
         } catch (e: Exception) {
             logger(e.message ?: "null message exception")
@@ -76,7 +76,7 @@ class PointRecorder(fileParent: File,
     }
 
     private fun close() {
-        this.writer?.close()
+        this.writer.close()
     }
 
     fun reset() {

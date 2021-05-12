@@ -12,4 +12,5 @@
     <string name="command_line_hint">Command</string>
     <string name="left_text_arrow"><![CDATA[<-]]></string>
     <string name="right_text_arrow"><![CDATA[->]]></string>
+    <string name="log_output_button">Log</string>
 </resources>

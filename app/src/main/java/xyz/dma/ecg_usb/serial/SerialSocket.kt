@@ -134,7 +134,9 @@ class SerialSocket(private val usbManager: UsbManager,
     }
 
     override fun onRunError(e: Exception?) {
-        log("On run error exception.\n${e?.stackTraceToString()}")
+        if(connected) {
+            log("On run error exception.\n${e?.stackTraceToString()}")
+        }
     }
 
     fun close() {

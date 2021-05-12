@@ -1,5 +1,6 @@
 package xyz.dma.ecg_usb
 
+import android.annotation.SuppressLint
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -9,7 +10,10 @@ import android.hardware.usb.UsbManager
 import android.os.Bundle
 import android.util.DisplayMetrics
 import android.view.View
-import android.widget.*
+import android.widget.Button
+import android.widget.EditText
+import android.widget.TextView
+import android.widget.ToggleButton
 import androidx.appcompat.app.AppCompatActivity
 import androidx.constraintlayout.widget.ConstraintLayout
 import androidx.core.content.FileProvider
@@ -36,6 +40,7 @@ class MainActivity : AppCompatActivity(), SerialDataListener, SerialSocketListen
     private var activeChannel = 1
     private var connectedBoard: String? = null
     private var pointPrinting = false
+    private var logInput = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -43,50 +48,41 @@ class MainActivity : AppCompatActivity(), SerialDataListener, SerialSocketListen
 
         initChannels()
 
-        try {
-            val permissionIntent = PendingIntent.getBroadcast(
-                this, 0,
-                Intent(ACTION_USB_PERMISSION), 0
-            )
+        val permissionIntent = PendingIntent.getBroadcast(this, 0, Intent(ACTION_USB_PERMISSION), 0)
 
-            startIncomingProcessing()
-            startChannelRefresher()
-            serialSocket = SerialSocket(getSystemService(Context.USB_SERVICE) as UsbManager, permissionIntent) { log(it, false)}
-            serialSocket.addDataListener(this)
-            serialSocket.addSocketListener(this)
+        startIncomingProcessing()
+        serialSocket =
+            SerialSocket(getSystemService(Context.USB_SERVICE) as UsbManager, permissionIntent) { log(it, false) }
+        serialSocket.addDataListener(this)
+        serialSocket.addSocketListener(this)
 
-            val filter = IntentFilter(ACTION_USB_PERMISSION)
+        val filter = IntentFilter(ACTION_USB_PERMISSION)
 
-            filter.addAction(UsbManager.ACTION_USB_DEVICE_DETACHED)
-            filter.addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED)
+        filter.addAction(UsbManager.ACTION_USB_DEVICE_DETACHED)
+        filter.addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED)
 
-            registerReceiver(object : BroadcastReceiver() {
-                override fun onReceive(context: Context?, intent: Intent?) {
-                    when (intent?.action) {
-                        ACTION_USB_PERMISSION -> {
-                            serialSocket.connect()
-                        }
-                        UsbManager.ACTION_USB_DEVICE_DETACHED -> {
-                            try {
-                                serialSocket.close()
-                            } catch (e: Exception) {
-                                log(e.message ?: "null message exception")
-                                log(e.stackTraceToString())
-                            }
-                        }
-                        UsbManager.ACTION_USB_DEVICE_ATTACHED -> {
-                            serialSocket.connect()
+        registerReceiver(object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                when (intent?.action) {
+                    ACTION_USB_PERMISSION -> {
+                        serialSocket.connect()
+                    }
+                    UsbManager.ACTION_USB_DEVICE_DETACHED -> {
+                        try {
+                            serialSocket.close()
+                        } catch (e: Exception) {
+                            log(e.message ?: "null message exception")
+                            log(e.stackTraceToString())
                         }
                     }
+                    UsbManager.ACTION_USB_DEVICE_ATTACHED -> {
+                        serialSocket.connect()
+                    }
                 }
-            }, filter)
+            }
+        }, filter)
 
-            // Try connect
-            serialSocket.connect()
-        } catch (e: Exception) {
-            log(e.message ?: "null message exception")
-            log(e.stackTraceToString())
-        }
+        serialSocket.connect()
     }
 
     private fun initChannels() {
@@ -95,27 +91,10 @@ class MainActivity : AppCompatActivity(), SerialDataListener, SerialSocketListen
         val dpWidth = displayMetrics.widthPixels / displayMetrics.density
 
         val graphView = findViewById<LineChart>(R.id.graph_line_view)
+        graphView.layoutParams.height = (dpWidth - 64).toInt()
         channelView = ChannelView(this, graphView)
-        for(channel in 1..5) {
+        for(channel in 1..12) {
             channels[channel] = Channel(this, "$channel", channelView) {log(it)}
-        }
-    }
-
-    private fun startChannelRefresher() {
-        executionService.submit {
-            try {
-                var time = System.currentTimeMillis()
-                while (!Thread.interrupted()) {
-                    val now = System.currentTimeMillis()
-                    if (now - time >= (1000f / 60f)) {
-                        channelView.refresh()
-                        time = now
-                    }
-                }
-            } catch (e: Exception) {
-                log(e.message ?: "null message exception")
-                log(e.stackTraceToString())
-            }
         }
     }
 
@@ -127,52 +106,21 @@ class MainActivity : AppCompatActivity(), SerialDataListener, SerialSocketListen
                 if (line.isEmpty()) {
                     continue
                 }
+                if(logInput) {
+                    log(line)
+                }
                 if (line.startsWith("ECG_STM32")) {
-                    val appInfo = line.split(":")
-                    if (appInfo.size != 4) {
-                        log("ECG_STM32 header is wrong, repeat request")
-                        serialSocket.send("M")
-                    } else {
-                        connectedBoard = appInfo[1]
-                        try {
-                            channelView.onBoardChange(appInfo[1])
-                        } catch (e: Exception) {
-                            log(e.message ?: "null message exception")
-                            log(e.stackTraceToString())
-                        }
-                        activeChannels = appInfo[2].toInt()
-                        log("Connected board %s, %d active channels".format(connectedBoard, activeChannels))
-                        serialSocket.send("0")
-                        for (i in channels.entries) {
-                            if (i.key > activeChannels) {
-                                i.value.stop()
-                            } else {
-                                i.value.start()
-                            }
-                        }
-                        runOnUiThread {
-                            if (activeChannels < 2) {
-                                findViewById<ConstraintLayout>(R.id.channels_control_layout).visibility = View.GONE
-                            } else {
-                                findViewById<ConstraintLayout>(R.id.channels_control_layout).visibility = View.VISIBLE
-                            }
-                            findViewById<Button>(R.id.startRecordButton).isEnabled = true
-                            findViewById<Button>(R.id.sendButton).isEnabled = true
-                        }
-                    }
+                    handleInfoHeader(line)
                 }
                 if (connectedBoard != null) {
                     if (activeChannels == 1 && line.isInt()) {
-                        channels[1]?.onSelect()
                         channels[1]?.addPoint(line.toInt())
                     } else if (activeChannels > 1) {
                         val parts = line.split(",")
                         if (parts.size == activeChannels || !parts[0].isInt()) {
-                            if (connectedBoard == "ADS1293") {
-                                for (i in parts.indices) {
-                                    if (parts[i].isInt()) {
-                                        channels[i + 1]?.addPoint(parts[i].toInt())
-                                    }
+                            for (i in parts.indices) {
+                                if (parts[i].isInt()) {
+                                    channels[i + 1]?.addPoint(parts[i].toInt())
                                 }
                             }
                         }
@@ -185,6 +133,40 @@ class MainActivity : AppCompatActivity(), SerialDataListener, SerialSocketListen
         }
     }
 
+    private fun handleInfoHeader(line: String) {
+        val appInfo = line.split(":")
+        if (appInfo.size != 4) {
+            log("ECG_STM32 header is wrong, repeat request")
+            serialSocket.send("M")
+        } else {
+            connectedBoard = appInfo[1]
+            try {
+                channelView.onBoardChange(appInfo[1])
+            } catch (e: Exception) {
+                log(e.message ?: "null message exception")
+                log(e.stackTraceToString())
+            }
+            activeChannels = appInfo[2].toInt()
+            log("Connected board %s, %d active channels".format(connectedBoard, activeChannels))
+            channels[1]?.onSelect()
+            serialSocket.send("0")
+            for (i in channels.entries) {
+                if (i.key > activeChannels) {
+                    i.value.stop()
+                } else {
+                    i.value.start()
+                }
+            }
+            runOnUiThread {
+                findViewById<ConstraintLayout>(R.id.channels_control_layout).visibility =
+                    if (activeChannels < 2) View.GONE else View.VISIBLE
+                findViewById<Button>(R.id.startRecordButton).isEnabled = true
+                findViewById<Button>(R.id.sendButton).isEnabled = true
+            }
+        }
+    }
+
+    @SuppressLint("SetTextI18n")
     private fun log(text: String, newLine: Boolean = true) {
         val textView = findViewById<TextView>(R.id.textView) ?: return
         runOnUiThread {
@@ -210,25 +192,31 @@ class MainActivity : AppCompatActivity(), SerialDataListener, SerialSocketListen
         }
     }
 
-    fun onBackChannelButton(view: View) {
-        var activeChannel = activeChannel - 1
-        if(activeChannel == 0) {
-            activeChannel = activeChannels
+    fun onLogOutputButtonClick(view: View) {
+        if(view is ToggleButton) {
+            logInput = view.isChecked
         }
-        this.activeChannel = activeChannel
-        channels[activeChannel]?.onSelect()
+    }
+
+    fun onBackChannelButton(view: View) {
+        changeActiveChannel(activeChannel - 1)
     }
 
     fun onForwardChannelButton(view: View) {
-        var activeChannel = activeChannel + 1
-        if(activeChannel > activeChannels) {
-            activeChannel = 1
+        changeActiveChannel(activeChannel + 1)
+    }
+
+    private fun changeActiveChannel(activeChannel: Int) {
+        this.activeChannel = when {
+            activeChannel > activeChannels -> 1
+            activeChannel == 0 -> activeChannels
+            else -> activeChannel
         }
-        this.activeChannel = activeChannel
-        channels[activeChannel]?.onSelect()
+        channels[this.activeChannel]?.onSelect()
     }
 
     private fun switchStartButton(view: Button = findViewById(R.id.startRecordButton)) {
+        val toggleButton = findViewById<ToggleButton>(R.id.recordToggleButton)
         if (pointPrinting) {
             view.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_stop, 0, 0, 0)
             channels.forEach {
@@ -247,9 +235,9 @@ class MainActivity : AppCompatActivity(), SerialDataListener, SerialSocketListen
                     it.value.pointPrinting = false
                 }
             }
-            findViewById<ToggleButton>(R.id.recordToggleButton).isActivated = false
+            toggleButton.isActivated = false
         }
-        findViewById<ToggleButton>(R.id.recordToggleButton).isEnabled = pointPrinting
+        toggleButton.isEnabled = pointPrinting
         serialSocket.reset()
     }
 

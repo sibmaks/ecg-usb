@@ -2,7 +2,6 @@ package xyz.dma.ecg_usb
 
 import android.app.Activity
 import android.graphics.Color
-import android.view.View
 import com.github.mikephil.charting.charts.LineChart
 import com.github.mikephil.charting.components.YAxis
 import com.github.mikephil.charting.data.Entry
@@ -10,6 +9,9 @@ import com.github.mikephil.charting.data.LineData
 import com.github.mikephil.charting.data.LineDataSet
 import com.github.mikephil.charting.utils.ColorTemplate
 import xyz.dma.ecg_usb.util.ResourceUtils
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import kotlin.math.roundToLong
 
 /**
  * Created by maksim.drobyshev on 12-May-21.
@@ -17,6 +19,7 @@ import xyz.dma.ecg_usb.util.ResourceUtils
 class ChannelView(private val activity: Activity,
                   private val lineChart: LineChart) {
     private val lineDataSet: LineDataSet
+    private val executionService = Executors.newFixedThreadPool(1)
 
     init {
         lineChart.setTouchEnabled(true)
@@ -35,13 +38,15 @@ class ChannelView(private val activity: Activity,
 
         lineChart.axisLeft.setDrawAxisLine(true)
         lineChart.axisLeft.setDrawGridLines(true)
-        //lineChart.axisLeft.granularity = 100f
+        lineChart.axisLeft.granularity = 10f
+        lineChart.axisLeft.isGranularityEnabled = true
+        lineChart.axisLeft.setLabelCount(10, true)
 
-        lineChart.visibility = View.VISIBLE
+        lineChart.axisRight.isEnabled = false
 
         val points = ArrayList<Entry>()
 
-        for(i in (lineChart.xAxis.axisMinimum.toInt())..(lineChart.xAxis.axisMaximum.toInt())) {
+        for(i in xMin()..xMax()) {
             points.add(Entry(i.toFloat(), 0f))
         }
 
@@ -62,16 +67,32 @@ class ChannelView(private val activity: Activity,
         lineData.setValueTextSize(9f)
 
         lineChart.data = lineData
-    }
 
-    fun refresh() {
-        lineChart.postInvalidate()
+        executionService.submit {
+            var time = System.currentTimeMillis()
+            val interval = 1000f / 60f
+            val halfInterval = (interval / 2f).roundToLong()
+            while (!Thread.interrupted()) {
+                val now = System.currentTimeMillis()
+                if (now - time >= interval) {
+                    lineChart.postInvalidate()
+                    time = now
+                } else if(now - time <= halfInterval) {
+                    TimeUnit.MILLISECONDS.sleep(halfInterval)
+                }
+            }
+        }
     }
 
     fun onBoardChange(boardName: String) {
         val boardConfigs = ResourceUtils.getHashMapResource(activity, R.xml.board_configs)
-        lineChart.axisLeft.axisMinimum = boardConfigs["${boardName}_min"]?.toFloat() ?: throw IllegalStateException("${boardName}_min not defined")
-        lineChart.axisLeft.axisMaximum = boardConfigs["${boardName}_max"]?.toFloat() ?: throw IllegalStateException("${boardName}_max not defined")
+        val min = boardConfigs["${boardName}_min"]?.toFloat() ?: throw IllegalStateException("${boardName}_min not defined")
+        val max = boardConfigs["${boardName}_max"]?.toFloat() ?: throw IllegalStateException("${boardName}_max not defined")
+        activity.runOnUiThread {
+            lineChart.axisLeft.axisMinimum = min
+            lineChart.axisLeft.axisMaximum = max
+            lineChart.fitScreen()
+        }
     }
 
     fun setViewPoints(points: List<Entry>) {

@@ -9,4 +9,7 @@
     <string name="record_button">Record</string>
     <string name="recording_button">Recording</string>
     <string name="reset_button">Reset</string>
-e</resources>
+    <string name="command_line_hint">Command</string>
+    <string name="left_text_arrow"><![CDATA[<-]]></string>
+    <string name="right_text_arrow"><![CDATA[->]]></string>
+</resources>

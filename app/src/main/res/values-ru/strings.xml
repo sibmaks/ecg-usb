@@ -9,4 +9,7 @@
     <string name="record_button">Запись</string>
     <string name="recording_button">Записываю</string>
     <string name="reset_button">Сбросить</string>
-e</resources>
+    <string name="command_line_hint">Комманда</string>
+    <string name="left_text_arrow"><![CDATA[<-]]></string>
+    <string name="right_text_arrow"><![CDATA[->]]></string>
+    e</resources>

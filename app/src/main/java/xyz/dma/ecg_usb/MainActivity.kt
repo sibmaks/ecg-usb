@@ -9,9 +9,9 @@ import android.hardware.usb.UsbManager
 import android.os.Bundle
 import android.util.DisplayMetrics
 import android.view.View
-import android.view.ViewGroup
 import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
+import androidx.constraintlayout.widget.ConstraintLayout
 import androidx.core.content.FileProvider
 import com.github.mikephil.charting.charts.LineChart
 import xyz.dma.ecg_usb.serial.SerialDataListener
@@ -28,10 +28,12 @@ import java.util.concurrent.LinkedBlockingQueue
 @ExperimentalUnsignedTypes
 class MainActivity : AppCompatActivity(), SerialDataListener, SerialSocketListener {
     private val channels = HashMap<Int, Channel>()
+    private lateinit var channelView: ChannelView
     private val incomingMessages = LinkedBlockingQueue<String>()
     private val executionService = Executors.newFixedThreadPool(4)
     private lateinit var serialSocket: SerialSocket
     private var activeChannels = 0
+    private var activeChannel = 1
     private var connectedBoard: String? = null
     private var pointPrinting = false
 
@@ -88,19 +90,14 @@ class MainActivity : AppCompatActivity(), SerialDataListener, SerialSocketListen
     }
 
     private fun initChannels() {
+        findViewById<ConstraintLayout>(R.id.channels_control_layout).visibility = View.GONE
         val displayMetrics: DisplayMetrics = resources.displayMetrics
         val dpWidth = displayMetrics.widthPixels / displayMetrics.density
 
-        val graphLayout = findViewById<LinearLayout>(R.id.graph_layout)
+        val graphView = findViewById<LineChart>(R.id.graph_line_view)
+        channelView = ChannelView(this, graphView)
         for(channel in 1..5) {
-            val graphView = LineChart(this)
-            graphView.layoutParams = ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                (dpWidth - 64).toInt()
-            )
-            graphView.visibility = View.GONE
-            graphLayout.addView(graphView)
-            channels[channel] = Channel(this, graphView, "$channel") {log(it)}
+            channels[channel] = Channel(this, "$channel", channelView) {log(it)}
         }
     }
 
@@ -111,11 +108,7 @@ class MainActivity : AppCompatActivity(), SerialDataListener, SerialSocketListen
                 while (!Thread.interrupted()) {
                     val now = System.currentTimeMillis()
                     if (now - time >= (1000f / 60f)) {
-                        for(channel in channels.values) {
-                            if(channel.isActive()) {
-                                channel.refresh()
-                            }
-                        }
+                        channelView.refresh()
                         time = now
                     }
                 }
@@ -142,9 +135,7 @@ class MainActivity : AppCompatActivity(), SerialDataListener, SerialSocketListen
                     } else {
                         connectedBoard = appInfo[1]
                         try {
-                            for (channel in channels) {
-                                channel.value.onBoardChange(appInfo[1])
-                            }
+                            channelView.onBoardChange(appInfo[1])
                         } catch (e: Exception) {
                             log(e.message ?: "null message exception")
                             log(e.stackTraceToString())
@@ -160,23 +151,35 @@ class MainActivity : AppCompatActivity(), SerialDataListener, SerialSocketListen
                             }
                         }
                         runOnUiThread {
+                            if (activeChannels < 2) {
+                                findViewById<ConstraintLayout>(R.id.channels_control_layout).visibility = View.GONE
+                            } else {
+                                findViewById<ConstraintLayout>(R.id.channels_control_layout).visibility = View.VISIBLE
+                            }
                             findViewById<Button>(R.id.startRecordButton).isEnabled = true
                             findViewById<Button>(R.id.sendButton).isEnabled = true
                         }
                     }
-                } else if (activeChannels == 1 && line.isInt()) {
-                    channels[1]?.addPoint(line.toInt())
-                } else if (activeChannels > 1) {
-                    val parts = line.split(",")
-                    if (parts.size == activeChannels || !parts[0].isInt()) {
-                        if (connectedBoard == "ADS1293") {
-                            for (i in parts.indices) {
-                                if (parts[i].isInt()) {
-                                    channels[i + 1]?.addPoint(parts[i].toInt())
+                }
+                if (connectedBoard != null) {
+                    if (activeChannels == 1 && line.isInt()) {
+                        channels[1]?.onSelect()
+                        channels[1]?.addPoint(line.toInt())
+                    } else if (activeChannels > 1) {
+                        val parts = line.split(",")
+                        if (parts.size == activeChannels || !parts[0].isInt()) {
+                            if (connectedBoard == "ADS1293") {
+                                for (i in parts.indices) {
+                                    if (parts[i].isInt()) {
+                                        channels[i + 1]?.addPoint(parts[i].toInt())
+                                    }
                                 }
                             }
                         }
                     }
+                } else {
+                    log("Device is unknown, request info")
+                    serialSocket.send("M")
                 }
             }
         }
@@ -202,11 +205,27 @@ class MainActivity : AppCompatActivity(), SerialDataListener, SerialSocketListen
     fun onRecordButtonClick(view: View) {
         if(view is ToggleButton) {
             channels.forEach {
-                if (it.value.isActive()) {
-                    it.value.recordOn = view.isChecked
-                }
+                it.value.recordOn = view.isChecked
             }
         }
+    }
+
+    fun onBackChannelButton(view: View) {
+        var activeChannel = activeChannel - 1
+        if(activeChannel == 0) {
+            activeChannel = activeChannels
+        }
+        this.activeChannel = activeChannel
+        channels[activeChannel]?.onSelect()
+    }
+
+    fun onForwardChannelButton(view: View) {
+        var activeChannel = activeChannel + 1
+        if(activeChannel > activeChannels) {
+            activeChannel = 1
+        }
+        this.activeChannel = activeChannel
+        channels[activeChannel]?.onSelect()
     }
 
     private fun switchStartButton(view: Button = findViewById(R.id.startRecordButton)) {

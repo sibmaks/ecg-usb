@@ -2,6 +2,6 @@
 <resources>
     <entry key="ADS1293_min">-2000000</entry>
     <entry key="ADS1293_max">2000000</entry>
-    <entry key="MAX30003_min">-200000</entry>
-    <entry key="MAX30003_max">2000000</entry>
+    <entry key="MAX30003_min">-30000</entry>
+    <entry key="MAX30003_max">45000</entry>
 </resources>

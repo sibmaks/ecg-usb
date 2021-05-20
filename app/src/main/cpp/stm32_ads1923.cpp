@@ -35,23 +35,29 @@ void loop() {
     if (command == NULL) {
       return;
     }
-    if (strcmp(command, "0") == 0) {
-      Serial.println("0. Show menu");
-      Serial.println("1. Print configs");
-      Serial.println("x. Print status");
-      Serial.println("3. On print output");
-      Serial.println("4. Off print output");
+    if (strcmp(command, "MENU") == 0) {
+      Serial.println("MENU. Show menu");
+      Serial.println("GET_CONFIGS. Print configs");
+      Serial.println("GET_ALL_CONFIGS. Print all board configs");
+      Serial.println("GET_ALL_CONFIGS. Print status");
+      Serial.println("START. On print output");
+      Serial.println("STOP. Off print output");
       Serial.println("5. Print samples per second");
       Serial.println("6. Print samples N millisecond");
       Serial.println("x. Change Type to N");
-      Serial.println("M. Get model info in format: ECG_STM32:NAME:CHANNELS:VERSION");
-    } else if (strcmp(command, "1") == 0) {
+      Serial.println("GET_PARAMETER. Get parameter by name");
+    } else if (strcmp(command, "GET_CONFIGS") == 0) {
       ads1293->readSensorID();
       readConfigs();
-    }  else if (strcmp(command, "3") == 0) {
+    } else if (strcmp(command, "GET_ALL_CONFIGS") == 0) {
+      ads1293->readSensorID();
+      readAllConfigs();
+    }  else if (strcmp(command, "START") == 0) {
       output_on = true;
-    } else if (strcmp(command, "4") == 0) {
+      Serial.println("DATA_FLOW_STARTED");
+    } else if (strcmp(command, "STOP") == 0) {
       output_on = false;
+      Serial.println("DATA_FLOW_STOPPED");
     } else if (strcmp(command, "5") == 0) {
       output_on = false;
       print_time = true;
@@ -66,9 +72,26 @@ void loop() {
       Serial.println("Input N: ");
       print_time_duration = Serial.parseInt();
       print_time_start = millis();
-    } else if (strcmp(command, "M") == 0) {
-      Serial.print("ECG_STM32:ADS1293:3:");
-      Serial.println(VERSION);
+    } else if(strcmp(command, "GET_PARAMETER") == 0) {
+      const char* parameter = NULL;
+      do {
+        parameter = commandReader->readCommand();
+      } while(parameter == NULL);
+      if(strcmp(parameter, "MODEL") == 0) {
+        Serial.println("ADS1293");
+      } else if(strcmp(parameter, "CHANNELS_COUNT") == 0) {
+        Serial.println("3");
+      } else if(strcmp(parameter, "VERSION") == 0) {
+        Serial.println(VERSION);
+      } else if(strcmp(parameter, "MIN_VALUE") == 0) {
+        Serial.println(-2000000);
+      } else if(strcmp(parameter, "MAX_VALUE") == 0) {
+        Serial.println(2000000);
+      } else {
+        Serial.print("Unknown parameter: '");
+        Serial.print(parameter);
+        Serial.println('\'');
+      }
     } else {
       Serial.print("Unknown command: '");
       Serial.print(command);
@@ -92,6 +115,14 @@ void loop() {
       Serial.print("Send: ");
       Serial.println(millis() - print_time_start);
     }
+  }
+}
+
+void readAllConfigs() {
+  for(int reg = 0; reg <= 0x50; reg ++) {
+    Serial.print(reg, HEX);
+    Serial.print(": ");
+    Serial.println(ads1293->readRegister(reg), HEX);
   }
 }
 
@@ -149,6 +180,10 @@ void readConfigs() {
 
 void setup_ECG() {
   ads1293->writeRegister(ADS1293::CONFIG, 0x00);
+
+  //ads1293->writeRegister(ADS1293::FLEX_CH1_CN, 0b01000000);
+  //ads1293->writeRegister(ADS1293::FLEX_CH2_CN, 0b10000000);
+  //ads1293->writeRegister(ADS1293::FLEX_CH3_CN, 0b11000000);
 
   ads1293->writeRegister(ADS1293::FLEX_CH1_CN, 0x11);
   ads1293->writeRegister(ADS1293::FLEX_CH2_CN, 0x19);

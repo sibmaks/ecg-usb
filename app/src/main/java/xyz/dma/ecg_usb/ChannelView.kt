@@ -8,7 +8,6 @@ import com.github.mikephil.charting.data.Entry
 import com.github.mikephil.charting.data.LineData
 import com.github.mikephil.charting.data.LineDataSet
 import com.github.mikephil.charting.utils.ColorTemplate
-import xyz.dma.ecg_usb.util.ResourceUtils
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import kotlin.math.roundToLong
@@ -84,13 +83,16 @@ class ChannelView(private val activity: Activity,
         }
     }
 
-    fun onBoardChange(boardName: String) {
-        val boardConfigs = ResourceUtils.getHashMapResource(activity, R.xml.board_configs)
-        val min = boardConfigs["${boardName}_min"]?.toFloat() ?: throw IllegalStateException("${boardName}_min not defined")
-        val max = boardConfigs["${boardName}_max"]?.toFloat() ?: throw IllegalStateException("${boardName}_max not defined")
+    fun changeMinValue(minValue: Float) {
         activity.runOnUiThread {
-            lineChart.axisLeft.axisMinimum = min
-            lineChart.axisLeft.axisMaximum = max
+            lineChart.axisLeft.axisMinimum = minValue
+            lineChart.fitScreen()
+        }
+    }
+
+    fun changeMaxValue(maxValue: Float) {
+        activity.runOnUiThread {
+            lineChart.axisLeft.axisMaximum = maxValue
             lineChart.fitScreen()
         }
     }

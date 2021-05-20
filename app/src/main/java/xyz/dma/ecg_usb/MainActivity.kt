@@ -34,8 +34,9 @@ class MainActivity : AppCompatActivity(), SerialDataListener, SerialSocketListen
     private val channels = HashMap<Int, Channel>()
     private lateinit var channelView: ChannelView
     private val incomingMessages = LinkedBlockingQueue<String>()
-    private val executionService = Executors.newFixedThreadPool(4)
+    private val executionService = Executors.newScheduledThreadPool(4)
     private lateinit var serialSocket: SerialSocket
+    private var nextParameter: BoardParameter? = null
     private var activeChannels = 0
     private var activeChannel = 1
     private var connectedBoard: String? = null
@@ -104,16 +105,103 @@ class MainActivity : AppCompatActivity(), SerialDataListener, SerialSocketListen
                 val line = incomingMessages.take()
 
                 if (line.isEmpty()) {
+                    if(nextParameter != null) {
+                        serialSocket.send("GET_PARAMETER\n${nextParameter}")
+                    }
                     continue
                 }
                 if(logInput) {
                     log(line)
                 }
-                if (line.startsWith("ECG_STM32")) {
-                    handleInfoHeader(line)
+                if(nextParameter != null) {
+                    try {
+                        when (nextParameter) {
+                            BoardParameter.MODEL -> {
+                                connectedBoard = line
+                                log("Connected board %s".format(connectedBoard))
+                                nextParameter = BoardParameter.VERSION
+                            }
+                            BoardParameter.VERSION -> {
+                                log("Board version %s".format(line))
+                                nextParameter = BoardParameter.MIN_VALUE
+                            }
+                            BoardParameter.MIN_VALUE -> {
+                                val value = line.toFloat()
+                                channelView.changeMinValue(value)
+                                log("Board min value %s".format(value))
+                                nextParameter = BoardParameter.MAX_VALUE
+                            }
+                            BoardParameter.MAX_VALUE -> {
+                                val value = line.toFloat()
+                                channelView.changeMaxValue(value)
+                                log("Board max value %s".format(value))
+                                nextParameter = BoardParameter.CHANNELS_COUNT
+                            }
+                            BoardParameter.CHANNELS_COUNT -> {
+                                activeChannels = line.toInt()
+                                log("Active channels %d".format(activeChannels))
+                                channels[1]?.onSelect()
+                                for (i in channels.entries) {
+                                    if (i.key > activeChannels) {
+                                        i.value.stop()
+                                    } else {
+                                        i.value.start()
+                                    }
+                                }
+                                runOnUiThread {
+                                    findViewById<ConstraintLayout>(R.id.channels_control_layout).visibility =
+                                        if (activeChannels < 2) View.GONE else View.VISIBLE
+                                    findViewById<Button>(R.id.startRecordButton).isEnabled = true
+                                    findViewById<Button>(R.id.sendButton).isEnabled = true
+                                }
+                                log("Initialization finished")
+                                nextParameter = null
+                            }
+                        }
+                    } catch (e: java.lang.Exception) {
+                        if(nextParameter != null) {
+                            serialSocket.send("GET_PARAMETER\n${nextParameter}")
+                        }
+                    } catch (e: Exception) {
+                        if(nextParameter != null) {
+                            serialSocket.send("GET_PARAMETER\n${nextParameter}")
+                        }
+                    }
+                    if(nextParameter != null) {
+                        serialSocket.send("GET_PARAMETER\n${nextParameter}")
+                    }
                 }
                 if (connectedBoard != null) {
-                    if (activeChannels == 1 && line.isInt()) {
+                    if(line.contains("DATA_FLOW_STARTED")) {
+                        runOnUiThread {
+                            val button = findViewById<Button>(R.id.startRecordButton)
+                            button.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_stop, 0, 0, 0)
+                            button.isEnabled = true
+
+                            channels.forEach {
+                                if (it.value.isActive()) {
+                                    it.value.pointPrinting = true
+                                }
+                            }
+                            val recordToggleButton = findViewById<ToggleButton>(R.id.recordToggleButton)
+                            recordToggleButton.isEnabled = pointPrinting
+                        }
+                    } else if(line.contains("DATA_FLOW_STOPPED")) {
+                        runOnUiThread {
+                            val button = findViewById<Button>(R.id.startRecordButton)
+                            button.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_play_arrow, 0, 0, 0)
+                            button.isEnabled = true
+
+                            channels.forEach {
+                                if (it.value.isActive()) {
+                                    it.value.pointPrinting = false
+                                }
+                            }
+                            val recordToggleButton = findViewById<ToggleButton>(R.id.recordToggleButton)
+                            recordToggleButton.isActivated = false
+                            recordToggleButton.isEnabled = pointPrinting
+                        }
+                    } else if (activeChannels == 1 && line.isInt()) {
                         channels[1]?.addPoint(line.toInt())
                     } else if (activeChannels > 1) {
                         val parts = line.split(",")
@@ -127,41 +215,8 @@ class MainActivity : AppCompatActivity(), SerialDataListener, SerialSocketListen
                     }
                 } else {
                     log("Device is unknown, request info")
-                    serialSocket.send("M")
+                    serialSocket.send("GET_PARAMETER\nMODEL")
                 }
-            }
-        }
-    }
-
-    private fun handleInfoHeader(line: String) {
-        val appInfo = line.split(":")
-        if (appInfo.size != 4) {
-            log("ECG_STM32 header is wrong, repeat request")
-            serialSocket.send("M")
-        } else {
-            connectedBoard = appInfo[1]
-            try {
-                channelView.onBoardChange(appInfo[1])
-            } catch (e: Exception) {
-                log(e.message ?: "null message exception")
-                log(e.stackTraceToString())
-            }
-            activeChannels = appInfo[2].toInt()
-            log("Connected board %s, %d active channels".format(connectedBoard, activeChannels))
-            channels[1]?.onSelect()
-            serialSocket.send("0")
-            for (i in channels.entries) {
-                if (i.key > activeChannels) {
-                    i.value.stop()
-                } else {
-                    i.value.start()
-                }
-            }
-            runOnUiThread {
-                findViewById<ConstraintLayout>(R.id.channels_control_layout).visibility =
-                    if (activeChannels < 2) View.GONE else View.VISIBLE
-                findViewById<Button>(R.id.startRecordButton).isEnabled = true
-                findViewById<Button>(R.id.sendButton).isEnabled = true
             }
         }
     }
@@ -216,29 +271,12 @@ class MainActivity : AppCompatActivity(), SerialDataListener, SerialSocketListen
     }
 
     private fun switchStartButton(view: Button = findViewById(R.id.startRecordButton)) {
-        val toggleButton = findViewById<ToggleButton>(R.id.recordToggleButton)
+        view.isEnabled = false
         if (pointPrinting) {
-            view.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_stop, 0, 0, 0)
-            channels.forEach {
-                if (it.value.isActive()) {
-                    it.value.pointPrinting = true
-                }
-            }
-            serialSocket.send("3")
+            serialSocket.send("START")
         } else {
-            view.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_play_arrow, 0, 0, 0)
-            if (serialSocket.isConnected()) {
-                serialSocket.send("4")
-            }
-            channels.forEach {
-                if (it.value.isActive()) {
-                    it.value.pointPrinting = false
-                }
-            }
-            toggleButton.isActivated = false
+            serialSocket.send("STOP")
         }
-        toggleButton.isEnabled = pointPrinting
-        serialSocket.reset()
     }
 
     fun onResetButtonClick(view: View) {
@@ -304,10 +342,13 @@ class MainActivity : AppCompatActivity(), SerialDataListener, SerialSocketListen
     }
 
     override fun onConnect(serialSocket: SerialSocket) {
-        serialSocket.send("M")
+        serialSocket.reset()
+        nextParameter = BoardParameter.MODEL
+        serialSocket.send("GET_PARAMETER\nMODEL")
     }
 
     override fun onDisconnect(serialSocket: SerialSocket) {
+        nextParameter = null
         connectedBoard = null
         pointPrinting = false
         channels.forEach {

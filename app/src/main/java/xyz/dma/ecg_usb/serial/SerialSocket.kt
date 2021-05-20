@@ -69,9 +69,15 @@ class SerialSocket(private val usbManager: UsbManager,
             Executors.newSingleThreadExecutor().submit(usbIoManager)
             log("Device connected")
             connected = true
-            executionService.submit {
-                socketListeners.forEach{
-                    it.onConnect(this)
+            socketListeners.forEach{
+                executionService.submit {
+                    try {
+                        it.onConnect(this)
+                    } catch (e: java.lang.Exception) {
+                        log("Error happened: ${e.message}\n${e.stackTraceToString()}")
+                    } catch (e: Exception) {
+                        log("Error happened: ${e.message}\n${e.stackTraceToString()}")
+                    }
                 }
             }
         } catch (e: Exception) {

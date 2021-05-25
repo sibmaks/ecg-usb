@@ -116,10 +116,6 @@ class SerialSocket(private val usbManager: UsbManager,
         byteQueue.clear()
     }
 
-    fun isConnected() : Boolean {
-        return connected
-    }
-
     override fun onNewData(data: ByteArray?) {
         if(data != null) {
             for(a in data) {

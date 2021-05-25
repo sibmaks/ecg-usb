@@ -24,6 +24,15 @@ namespace ADS1293 {
 	  digitalWrite(csPin, HIGH);
 	}
 
+	uint8_t ADS1293::readRegister(const uint8_t address) {
+	  uint8_t reg = address | RREG;
+	  digitalWrite(csPin, LOW);
+	  SPI.transfer(reg);
+	  uint8_t data = SPI.transfer(0);
+	  digitalWrite(csPin, HIGH);
+	  return data;
+	}
+
 	uint8_t ADS1293::readRegister(const Registers_e address) {
 	  uint8_t reg = address | RREG;
 	  digitalWrite(csPin, LOW);
@@ -44,7 +53,10 @@ namespace ADS1293 {
 	  adc_out |= SPI.transfer(0);
 	  digitalWrite(csPin, HIGH);
 	  //return 1000000 * (vRef * (2.0f * adc_out / adcMax - 1.0f) / 3.5f);
-	  return 285714 * (vRef * (2.0f * adc_out / adcMax - 1.0f));
+	  return 1000000 * (vRef * ((2.0f * adc_out) / adcMax - 1.0f) / 3.5f);
+	  //return adc_out;
+	  //return 285714 * (vRef * (2.0f * adc_out / adcMax - 1.0f));
+	  //return 285714 * (vRef * (2.0 * adc_out / adcMax - 1.0));
 	}
 
 	bool ADS1293::readSensorID() {

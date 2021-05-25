@@ -56,6 +56,8 @@ namespace ADS1293 {
 		void writeRegister(const Registers_e address, uint8_t data);
 
 		uint8_t readRegister(const Registers_e address);
+		
+		uint8_t readRegister(const uint8_t address);
 
 		int32_t readECG(uint8_t channel, uint32_t vRef, uint32_t adcMax);
 

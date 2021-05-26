@@ -9,13 +9,6 @@ CommandReader::~CommandReader() {
 	delete command;
 }
 
-void CommandReader::clearCommand() {
-  commandLength = 0;
-  for (int i = 0; i < maxLength; i++) {
-    command[i] = '\0';
-  }
-}
-
 const char* CommandReader::readCommand() {
     int c;
     do {
@@ -24,7 +17,7 @@ const char* CommandReader::readCommand() {
     if (c == -1) {
       return NULL;
     }
-    clearCommand();
+    commandLength = 0;
     command[commandLength++] = c;
 
     while (!isSpace((c = Serial.read()))) {
@@ -42,5 +35,6 @@ const char* CommandReader::readCommand() {
         return NULL;
       }
 	}
+	command[commandLength] = '\0';
 	return command;
 }

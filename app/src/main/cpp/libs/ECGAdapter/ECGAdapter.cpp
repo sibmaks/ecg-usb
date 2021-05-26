@@ -1,5 +1,5 @@
 #include "ECGAdapter.h"
-#define DATA_APPROVE_AWAITING 75
+#define DATA_APPROVE_AWAITING 50
 
 ECGAdapter::ECGAdapter(const char* name, uint32_t channels, const char* version, int32_t minValue, int32_t maxValue, int32_t maxDataToSend) : 
 	name(name), channels(channels), version(version), minValue(minValue),
@@ -11,12 +11,28 @@ ECGAdapter::ECGAdapter(const char* name, uint32_t channels, const char* version,
 }
 
 void ECGAdapter::loop() {
-	if (Serial.available()) {
+	if (Serial.available() >= 3) {
 	const char* command = commandReader.readCommand();
 	if (command == NULL) {
 	  return;
 	}
-	if (strcmp(command, "GET_PARAMETER") == 0) {
+	if (strcmp(command, "DA_RD") == 0) {
+    	  const char* id_line = NULL;
+    	  do {
+    		id_line = commandReader.readCommand();
+    	  } while (id_line == NULL);
+    	  if (data_sent_id >= atoi(id_line)) {
+    		data_sent = false;
+    		dataLine.removes(this->channels * this->data_sent_count);
+    		Serial.print("\nDR_OK ");
+    	  } else {
+    		Serial.print("\nDR_II");
+    		Serial.print(data_sent_id);
+    		Serial.print(" ");
+    		Serial.print(id_line);
+    	  }
+    	  Serial.print("\nEND");
+    } else if (strcmp(command, "GET_PARAMETER") == 0) {
 	  const char* parameter = NULL;
 	  do {
 		parameter = commandReader.readCommand();
@@ -48,22 +64,6 @@ void ECGAdapter::loop() {
 	  output_on = false;
 	  dataLine.clear();
 	  Serial.print("\nDF_OFF \nEND");
-	} else if (strcmp(command, "DA_RD") == 0) {
-	  const char* id_line = NULL;
-	  do {
-		id_line = commandReader.readCommand();
-	  } while (id_line == NULL);
-	  if (data_sent_id >= atoi(id_line)) {
-		data_sent = false;
-		dataLine.removes(this->channels * this->data_sent_count);
-		Serial.print("\nDR_OK ");
-	  } else {
-		Serial.print("\nDR_II");
-		Serial.print(data_sent_id);
-		Serial.print(" ");
-		Serial.print(id_line);
-	  }
-	  Serial.print("\nEND");
 	}
   }
   if (dataLine.getSize() > 0) {
@@ -81,20 +81,12 @@ void ECGAdapter::loop() {
 	  hash ^= data_sent_count;
 	  Serial.write((byte*)&data_sent_id, 4);
 	  Serial.write((byte*)&data_sent_count, 4);
-		//	Serial.print(data_sent_id);
-			//Serial.print(" ");
-			//Serial.print(data_sent_count);
-			//Serial.print(" ");
 	  for (uint32_t i = 0; i < data_sent_count; i++) {
 		  for(uint32_t c = 0; c < this->channels; c++) {
 			Serial.write((byte*)(vals + i * this->channels + c), 4);
-			//Serial.print(vals[i][c]);
-			//Serial.print(" ");
 			hash ^= vals[i * this->channels + c];
 		  }
 	  }
-			//Serial.print(hash);
-			//Serial.print(" ");
 	  Serial.write((byte*)&hash, 4);
 	  Serial.print("\nEND");
 	  data_sent_time = t;

@@ -6,8 +6,6 @@ class CommandReader {
 		unsigned int maxLength;
 		char* command;
 		unsigned int commandLength;
-		
-		void clearCommand();
 	public:
 		CommandReader(unsigned int maxLength = 32);
 		

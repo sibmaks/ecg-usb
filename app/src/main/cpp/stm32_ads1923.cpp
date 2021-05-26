@@ -1,3 +1,5 @@
+#define DATA_LINE_SIZE 2048
+
 #include "ADS1293.h"
 #include "ECGAdapter.h"
 

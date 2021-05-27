@@ -46,9 +46,9 @@ namespace ADS1293 {
 	  uint8_t reg = (DATA_CH1_ECG_1 + 3 * (channel - 1)) | RREG;
 	  digitalWrite(csPin, LOW);
 	  SPI.transfer(reg);
-	  int32_t adc_out = SPI.transfer(0) << 16;
+	  uint32_t adc_out = ((uint32_t)SPI.transfer(0)) << 16;
 	  SPI.transfer(reg + 1);
-	  adc_out |= SPI.transfer(0) << 8;
+	  adc_out |= ((uint32_t)SPI.transfer(0)) << 8;
 	  SPI.transfer(reg + 2);
 	  adc_out |= SPI.transfer(0);
 	  digitalWrite(csPin, HIGH);

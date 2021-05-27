@@ -22,7 +22,6 @@ class ECGAdapter {
 		unsigned long data_sent_time;
 		
 		CommandReader commandReader = CommandReader();
-		DataLine<int> dataLine = DataLine<int>();
 	public:
 		ECGAdapter(const char* name, uint32_t channels, const char* version, int32_t minValue, int32_t maxValue, int32_t maxDataToSend);
 		
@@ -30,9 +29,7 @@ class ECGAdapter {
 		
 		boolean isOutputOn() const;
 		
-		void add(int value);
-
-		const DataLine<int>* getDataLine() const;
+		void send(int32_t* values) const;
 };
 
 #endif

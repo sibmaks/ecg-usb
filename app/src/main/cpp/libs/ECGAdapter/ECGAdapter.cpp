@@ -1,5 +1,8 @@
 #include "ECGAdapter.h"
 #define DATA_APPROVE_AWAITING 50
+#ifndef ECG_DEBUG_MODE_H_
+#define ECG_DEBUG_MODE_H_ false
+#endif
 
 ECGAdapter::ECGAdapter(const char* name, uint32_t channels, const char* version, int32_t minValue, int32_t maxValue, int32_t maxDataToSend) : 
 	name(name), channels(channels), version(version), minValue(minValue),
@@ -16,23 +19,7 @@ void ECGAdapter::loop() {
 	if (command == NULL) {
 	  return;
 	}
-	if (strcmp(command, "DA_RD") == 0) {
-    	  const char* id_line = NULL;
-    	  do {
-    		id_line = commandReader.readCommand();
-    	  } while (id_line == NULL);
-    	  if (data_sent_id >= atoi(id_line)) {
-    		data_sent = false;
-    		dataLine.removes(this->channels * this->data_sent_count);
-    		Serial.print("\nDR_OK ");
-    	  } else {
-    		Serial.print("\nDR_II");
-    		Serial.print(data_sent_id);
-    		Serial.print(" ");
-    		Serial.print(id_line);
-    	  }
-    	  Serial.print("\nEND");
-    } else if (strcmp(command, "GET_PARAMETER") == 0) {
+	if (strcmp(command, "GET_PARAMETER") == 0) {
 	  const char* parameter = NULL;
 	  do {
 		parameter = commandReader.readCommand();
@@ -62,35 +49,7 @@ void ECGAdapter::loop() {
 	  Serial.print("\nDF_ON \nEND");
 	} else if (strcmp(command, "OFF_DF") == 0) {
 	  output_on = false;
-	  dataLine.clear();
 	  Serial.print("\nDF_OFF \nEND");
-	}
-  }
-  if (dataLine.getSize() > 0) {
-	long t;
-	uint32_t s = dataLine.getSize() / 3;
-	if (!data_sent || ((t = millis()) - data_sent_time) >= DATA_APPROVE_AWAITING) {
-	  if (!data_sent) {
-		data_sent_id++;
-	  }
-
-	  data_sent_count = min(s, (uint32_t)this->maxDataToSend);
-	  const int* vals = dataLine.getValues();
-	  Serial.print("\nDATA ");
-	  uint32_t hash = data_sent_id;
-	  hash ^= data_sent_count;
-	  Serial.write((byte*)&data_sent_id, 4);
-	  Serial.write((byte*)&data_sent_count, 4);
-	  for (uint32_t i = 0; i < data_sent_count; i++) {
-		  for(uint32_t c = 0; c < this->channels; c++) {
-			Serial.write((byte*)(vals + i * this->channels + c), 4);
-			hash ^= vals[i * this->channels + c];
-		  }
-	  }
-	  Serial.write((byte*)&hash, 4);
-	  Serial.print("\nEND");
-	  data_sent_time = t;
-	  data_sent = true;
 	}
   }
 }
@@ -99,11 +58,25 @@ boolean ECGAdapter::isOutputOn() const {
 	return output_on;
 }
 
-void ECGAdapter::add(int value) {
-	dataLine.add(value);
+#if ECG_DEBUG_MODE_H_
+void ECGAdapter::send(int32_t* values) const {
+	  uint32_t hash = this->channels;
+      for(uint32_t c = 0; c < this->channels; c++) {
+	    Serial.print((values[c]);
+	    Serial.print(",");
+		hash ^= values[c];
+      }
+	  Serial.println();
 }
-
-
-const DataLine<int>* ECGAdapter::getDataLine() const {
-    return &(this->dataLine);
+#else
+void ECGAdapter::send(int32_t* values) const {
+	  Serial.print("\nDATA ");
+	  uint32_t hash = this->channels;
+      for(uint32_t c = 0; c < this->channels; c++) {
+	    Serial.write((byte*)(values + c), 4);
+		hash ^= values[c];
+      }
+	  Serial.write((byte*)&hash, 4);
+	  Serial.print("\nEND");
 }
+#endif

@@ -27,8 +27,6 @@ class MobileECG
 		virtual int32_t getMinValue() const = 0;
 		
 		virtual int32_t getMaxValue() const = 0;
-				
-		virtual uint8_t readRegister(const uint8_t address) const = 0;
 
 		virtual int32_t* readECG() = 0;
 

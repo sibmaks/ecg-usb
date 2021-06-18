@@ -1,18 +1,16 @@
-#define DATA_LINE_SIZE 2048
-
 #define IO_DELAY 50
 #define MAX30003_CS_PIN PB0
 
 #include "MAX30003.h"
 #include "ECGAdapter.h"
 
-MAX30003 max30003(MAX30003_CS_PIN, IO_DELAY);
-ECGAdapter ecgAdapter("MAX30003", 1, "2.0.0", -30000, 45000, 64);
+MAX30003 max30003(IO_DELAY, MAX30003_CS_PIN, 0);
+ECGAdapter ecgAdapter(max30003, "2.0.0", 64);
 
 void setup() {
   max30003.begin();
 
-  MAX30003_begin();
+  setup_ECG();
 }
 
 void loop() {
@@ -30,14 +28,11 @@ void loop() {
     return;
   }
 
-  byte etag;
-
-  int_least32_t ecgdata = readEcg(etag);
+  int32_t* ecgdata = max30003.readECG();
+  uint8_t etag = max30003.getEtag();
 
   if (etag == FIFO_VALID_SAMPLE || etag == FIFO_LAST_SAMPLE) {
-    if(ecgAdapter.isOutputOn()) {
-      ecgAdapter.add(ecgdata);
-    }
+    ecgAdapter.send(ecgdata);
     //Serial.println(ecgdata);
   } else if (etag == FIFO_OVF) {
     max30003.fifoReset();
@@ -45,13 +40,7 @@ void loop() {
   }
 }
 
-int_least32_t readEcg(byte& etag) {
-  uint32_t data = max30003.readUint32(Registers_e::ECG_FIFO);
-  etag = (data >> 3) & 0x7;
-  return (((int_least32_t)((int_least16_t)(data >> 8))) << 2) | ((int_least32_t)(data & 0b11));
-}
-
-void MAX30003_begin() {
+void setup_ECG() {
   max30003.swReset();
   max30003.fifoReset();
 

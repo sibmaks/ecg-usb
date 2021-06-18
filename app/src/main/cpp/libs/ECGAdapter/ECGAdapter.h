@@ -4,17 +4,14 @@
 #include <Arduino.h>
 #include "CommandReader.h"
 #include "DataLine.h"
+#include "MobileECG.h"
 
 class ECGAdapter {
 	private:
-		const char* name;
-		uint32_t channels;
+		MobileECG& mobileEcg;
 		const char* version;
-		int32_t minValue;
-		int32_t maxValue;
 		int32_t maxDataToSend;
-		
-		
+
 		boolean output_on;
 		boolean data_sent;
 		uint32_t data_sent_id;
@@ -23,9 +20,9 @@ class ECGAdapter {
 		
 		CommandReader commandReader = CommandReader();
 	public:
-		ECGAdapter(const char* name, uint32_t channels, const char* version, int32_t minValue, int32_t maxValue, int32_t maxDataToSend);
+		ECGAdapter(MobileECG& mobileEcg, const char* version, uint8_t maxDataToSend);
 		
-		void loop();
+		const char* loop();
 		
 		boolean isOutputOn() const;
 		

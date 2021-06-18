@@ -6,7 +6,7 @@
 
 ECGAdapter::ECGAdapter(MobileECG& mobileEcg, const char* version) :
 	mobileEcg(mobileEcg), version(version) {
-	Serial.begin(2250000);
+	Serial.begin(921600);
 	this->output_on = false;
 	this->data_sent = false;
 	this->data_sent_id = 0;

@@ -8,7 +8,7 @@
 #define ADC_MAX 0xF30000
 
 ADS1293::ADS1293 ads1293(V_REF, ADC_MAX, ADS1293_CS_PIN, ADS1293_DR_PIN);
-ECGAdapter ecgAdapter(ads1293, "2.0.0", 64);
+ECGAdapter ecgAdapter(ads1293, "2.0.0");
 
 void setup() {
   ads1293.begin();

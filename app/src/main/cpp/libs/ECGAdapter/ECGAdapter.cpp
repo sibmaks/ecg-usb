@@ -4,8 +4,8 @@
 #define ECG_DEBUG_MODE_H_ false
 #endif
 
-ECGAdapter::ECGAdapter(MobileECG& mobileEcg, const char* version, uint8_t maxDataToSend) : 
-	mobileEcg(mobileEcg), version(version), maxDataToSend(maxDataToSend) {
+ECGAdapter::ECGAdapter(MobileECG& mobileEcg, const char* version) :
+	mobileEcg(mobileEcg), version(version) {
 	Serial.begin(2250000);
 	this->output_on = false;
 	this->data_sent = false;
@@ -38,9 +38,6 @@ const char* ECGAdapter::loop() {
 	  } else if (strcmp(parameter, "MAX_VALUE") == 0) {
 		Serial.print("\nMAX_VALUE ");
 		Serial.print(this->mobileEcg.getMaxValue());
-	  } else if (strcmp(parameter, "MAX_DATA_TO_SEND") == 0) {
-		Serial.print("\nMAX_DTS ");
-		Serial.print(this->maxDataToSend);
 	  }
 	  Serial.print("\nEND");
 	} else if (strcmp(command, "ON_DF") == 0) {
@@ -77,6 +74,8 @@ void ECGAdapter::send(int32_t* values) const {
 	  Serial.print("\nDATA ");
 	  uint8_t channels = this->mobileEcg.getChannels();
 	  uint32_t hash = channels;
+	  uint8_t size = channels * 4 + 4;
+	  Serial.write(size);
 	  Serial.write((byte*)values, channels * 4);
       for(uint32_t c = 0; c < channels; c++) {
 		hash ^= values[c];

@@ -5,7 +5,7 @@
 #include "ECGAdapter.h"
 
 MAX30003 max30003(IO_DELAY, MAX30003_CS_PIN, 0);
-ECGAdapter ecgAdapter(max30003, "2.0.0", 64);
+ECGAdapter ecgAdapter(max30003, "2.0.0");
 
 void setup() {
   max30003.begin();

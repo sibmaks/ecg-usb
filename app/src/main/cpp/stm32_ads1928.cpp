@@ -6,7 +6,7 @@
 #define ADS1298_START_PIN PB10
 
 ADS1298::ADS1298 ads1298(ADS1298_CS_PIN, ADS1298_DR_PIN);
-ECGAdapter ecgAdapter(ads1298, "2.0.0", 64);
+ECGAdapter ecgAdapter(ads1298, "2.0.0");
 
 void setup() {
   ads1298.begin();

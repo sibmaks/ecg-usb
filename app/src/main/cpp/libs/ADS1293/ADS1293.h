@@ -2,6 +2,8 @@
 #define ADS1293_H_
 
 #include <Arduino.h>
+#include "MobileECG.h"
+
 #define WREG 0x7f
 #define RREG 0x80
 
@@ -42,28 +44,36 @@ namespace ADS1293 {
 		REVID = 0x40
 	};
 
-	class ADS1293
+	class ADS1293 : public virtual MobileECG
 	{
-	private:
-		int csPin;
-		int dataReadyPin;
+		private:
+			float vRef;
+			uint32_t adcMax;		
+			int32_t ecgData[3];	
+		public:
+			ADS1293(float vRef, uint32_t adcMax, uint8_t csPin, uint8_t dataReadyPin);
 
-	public:
-		ADS1293(int csPin, int dataReadyPin);
+			void writeRegister(const Registers_e address, uint8_t data) const;
 
-		void begin();
+			uint8_t readRegister(const Registers_e address) const;
+			
+			virtual void begin() const override;
+			
+			virtual uint8_t readRegister(const uint8_t address) const;
+			
+			virtual int32_t* readECG();
 
-		void writeRegister(const Registers_e address, uint8_t data);
+			virtual bool readSensorID() const;
 
-		uint8_t readRegister(const Registers_e address);
-		
-		uint8_t readRegister(const uint8_t address);
-
-		int32_t readECG(uint8_t channel, uint32_t vRef, uint32_t adcMax);
-
-		bool readSensorID();
-
-		bool isDataReady();
+			virtual void printConfigs() const;
+			
+			virtual const char* getName() const;
+			
+			virtual uint8_t getChannels() const;
+			
+			virtual int32_t getMinValue() const;
+			
+			virtual int32_t getMaxValue() const;
 	};
 }
 

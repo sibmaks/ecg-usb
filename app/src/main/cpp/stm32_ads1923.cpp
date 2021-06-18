@@ -1,17 +1,14 @@
-#define DATA_LINE_SIZE 2048
-
 #include "ADS1293.h"
 #include "ECGAdapter.h"
 
 #define ADS1293_CS_PIN PB0
 #define ADS1293_DR_PIN PB1
 
-#define V_REF 2.4
+#define V_REF 2.4f
 #define ADC_MAX 0xF30000
 
-
-ADS1293::ADS1293 ads1293(ADS1293_CS_PIN, ADS1293_DR_PIN);
-ECGAdapter ecgAdapter("ADS1293", 3, "2.0.0", -2000000, 2000000, 64);
+ADS1293::ADS1293 ads1293(V_REF, ADC_MAX, ADS1293_CS_PIN, ADS1293_DR_PIN);
+ECGAdapter ecgAdapter(ads1293, "2.0.0", 64);
 
 void setup() {
   ads1293.begin();
@@ -19,21 +16,12 @@ void setup() {
   setup_ECG();
 }
 
-int counter = 0;
-
 void loop() {
   ecgAdapter.loop();
 
   if (ads1293.isDataReady()) {
-    int32_t ecgVal = ads1293.readECG(1, V_REF, ADC_MAX);
-    int32_t ecgVal2 = ads1293.readECG(2, V_REF, ADC_MAX);
-    int32_t ecgVal3 = ads1293.readECG(3, V_REF, ADC_MAX);
-
-    if(ecgAdapter.isOutputOn() && ecgAdapter.getDataLine()->hasSpace(3)) {
-      ecgAdapter.add(ecgVal);
-      ecgAdapter.add(ecgVal2);
-      ecgAdapter.add(ecgVal3);
-    }
+      int32_t* ecgs = ads1293.readECG();
+      ecgAdapter.send(ecgs);
   }
 }
 

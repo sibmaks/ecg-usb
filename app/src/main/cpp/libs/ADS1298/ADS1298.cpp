@@ -195,7 +195,6 @@ namespace ADS1298 {
 		this->writeCommand(SPICommands_e::START);
 	}
 	
-	
 	const char* ADS1298::getName() const {
 		return "ADS1298";
 	}

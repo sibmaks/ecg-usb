@@ -10,8 +10,8 @@ class ECGAdapter {
 	private:
 		MobileECG& mobileEcg;
 		const char* version;
-		int32_t maxDataToSend;
-
+		
+		
 		boolean output_on;
 		boolean data_sent;
 		uint32_t data_sent_id;
@@ -20,7 +20,7 @@ class ECGAdapter {
 		
 		CommandReader commandReader = CommandReader();
 	public:
-		ECGAdapter(MobileECG& mobileEcg, const char* version, uint8_t maxDataToSend);
+		ECGAdapter(MobileECG& mobileEcg, const char* version);
 		
 		const char* loop();
 		

@@ -49,6 +49,7 @@ void setup_ECG() {
   ads1293.writeRegister(ADS1293::AFE_RES, 0b00111111);
 
   ads1293.writeRegister(ADS1293::AFE_SHDN_CN, 0);
+  ads1293.writeRegister(ADS1293::AFE_PACE_CN, 1);
 
   ads1293.writeRegister(ADS1293::R2_RATE, 0x04);
 
@@ -58,7 +59,7 @@ void setup_ECG() {
 
   ads1293.writeRegister(ADS1293::R1_RATE, 0b00000111);
 
-  ads1293.writeRegister(ADS1293::DRDYB_SRC, 0b111000);
+  ads1293.writeRegister(ADS1293::DRDYB_SRC, 0b00111000);
   ads1293.writeRegister(ADS1293::CH_CNFG, 0b01110000);
 
   ads1293.writeRegister(ADS1293::CONFIG, 0x01);

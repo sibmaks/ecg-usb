@@ -9,10 +9,12 @@
 #define RREG 0x80
 
 namespace ADS1293 {
+	
     enum Registers_e {
         FLEX_CH1_CN = 0x01,
             FLEX_CH2_CN = 0x02,
             FLEX_CH3_CN = 0x03,
+			FLEX_PACE_CN = 0x04,
             CMDET_EN = 0x0A,
             RLD_CN = 0x0C,
             WILSON_EN1 = 0x0D,
@@ -22,6 +24,7 @@ namespace ADS1293 {
             OSC_CN = 0x12,
             AFE_RES = 0x13,
             AFE_SHDN_CN = 0x14,
+			AFE_PACE_CN = 0x17,
             R2_RATE = 0x21,
             R3_RATE_CH1 = 0x22,
             R3_RATE_CH2 = 0x23,
@@ -52,6 +55,22 @@ namespace ADS1293 {
 			
 			int32_t ecgData[3];
 		
+			const char* RegisterNames[0x31] = {
+				"CONFIG", "FLEX_CH1_CN", "FLEX_CH2_CN", "FLEX_CH3_CN",
+				"FLEX_PACE_CN", "FLEX_VBAT_CN", "LOD_CN", "LOD_EN",
+				"LOD_CURRENT", "LOD_AC_CN", "CMDET_EN", "CMDET_CN",
+				"RLD_CN", "WILSON_EN1", "WILSON_EN2", "WILSON_EN3", 
+				"WILSON_CN", "REF_CN", "OSC_CN", "AFE_RES",
+				"AFE_SHDN_CN", "AFE_FAULT_CN", NULL, "AFE_PACE_CN",
+				"ERROR_LOD", "ERROR_STATUS", "ERROR_RANGE1", 
+				"ERROR_RANGE2", "ERROR_RANGE3", "ERROR_SYNC",
+				"ERROR_MISC", "DIGO_STRENGTH", NULL, "R2_RATE",
+				"R3_RATE_CH1", "R3_RATE_CH2", "R3_RATE_CH3",
+				"R1_RATE", "DIS_EFILTER", "DRDYB_SRC",
+				"SYNCB_CN", "MASK_DRDYB", "MASK_ERR",
+				NULL, NULL, NULL, "ALARM_FILTER",
+				"CH_CNFG", "DATA_STATUS"
+			};
         public: 
 			ADS1293(float vRef, uint32_t adcMax, uint8_t csPin, uint8_t dataReadyPin);
 

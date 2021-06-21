@@ -74,11 +74,12 @@ void ECGAdapter::send(int32_t* values) const {
 	}
 	  Serial.print("\nDAT");
 	  uint8_t channels = this->mobileEcg.getChannels();
-	  uint32_t hash = channels;
-	  uint8_t size = channels * 4 + 4;
-	  Serial.write(size);
+	  //uint8_t size = channels * 4 + 4;
+	  //uint8_t size = channels * 4;
+	  //Serial.write(size);
 	  Serial.write((byte*)values, channels * 4);
-      for(uint8_t c = 0; c < channels; c++) {
+	  uint32_t hash = values[0];
+      for(uint8_t c = 1; c < channels; c++) {
 		hash ^= values[c];
       }
 	  Serial.write((byte*)&hash, 4);

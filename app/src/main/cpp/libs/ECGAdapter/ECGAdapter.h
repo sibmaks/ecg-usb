@@ -10,14 +10,7 @@ class ECGAdapter {
 	private:
 		MobileECG& mobileEcg;
 		const char* version;
-		
-		
-		boolean output_on;
-		boolean data_sent;
-		uint32_t data_sent_id;
-		uint32_t data_sent_count;
-		unsigned long data_sent_time;
-		
+		boolean outputOn;
 		CommandReader commandReader = CommandReader();
 	public:
 		ECGAdapter(MobileECG& mobileEcg, const char* version);

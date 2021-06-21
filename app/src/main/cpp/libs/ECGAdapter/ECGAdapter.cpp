@@ -1,15 +1,10 @@
 #include "ECGAdapter.h"
 #define DATA_APPROVE_AWAITING 50
-#ifndef ECG_DEBUG_MODE_H_
-#define ECG_DEBUG_MODE_H_ false
-#endif
 
 ECGAdapter::ECGAdapter(MobileECG& mobileEcg, const char* version) : 
 	mobileEcg(mobileEcg), version(version) {
 	Serial.begin(1228800);
-	this->output_on = false;
-	this->data_sent = false;
-	this->data_sent_id = 0;
+	this->outputOn = false;
 }
 
 const char* ECGAdapter::loop() {
@@ -41,10 +36,10 @@ const char* ECGAdapter::loop() {
 	  }
 	  Serial.print("\nEND");
 	} else if (strcmp(command, "ON_DF") == 0) {
-	  output_on = true;
+	  outputOn = true;
 	  Serial.print("\nDF1\nEND");
 	} else if (strcmp(command, "OFF_DF") == 0) {
-	  output_on = false;
+	  outputOn = false;
 	  Serial.print("\nDF0\nEND");
 	} else if (strcmp(command, "CONFIGS") == 0) {
 	  this->mobileEcg.printConfigs();
@@ -56,7 +51,7 @@ const char* ECGAdapter::loop() {
 }
 
 boolean ECGAdapter::isOutputOn() const {
-	return output_on;
+	return outputOn;
 }
 
 /* for debug
@@ -69,7 +64,7 @@ void ECGAdapter::send(int32_t* values) const {
 }*/
 
 void ECGAdapter::send(int32_t* values) const {
-    if(!output_on) {
+    if(!outputOn) {
 		return;
 	}
 	  Serial.print("\nDAT");
@@ -87,7 +82,7 @@ void ECGAdapter::send(int32_t* values) const {
 
 /* for PC
 void ECGAdapter::send(int32_t* values) const {
-    if(!output_on) {
+    if(!outputOn) {
 		return;
 	}
 	  Serial.print("\nDAT");
